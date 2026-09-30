@@ -629,6 +629,11 @@ void app_main(void)
      * (below) - the WiFi co-processor and the card share one SD host controller. */
     kvm_wifi_announce(); /* show the Connection switcher/settings in every mode */
     const int32_t net_mode = kvm_setting_int("net_mode");
+#if CONFIG_KVM_ETH_WIFI_FAILOVER
+    const bool dual_net = net_mode != KVM_NET_WIFI_AP && !kvm_storage_shares_wifi_slot();
+#else
+    const bool dual_net = false;
+#endif
 
     /* The microSD card, if any. A KVM without one is still a KVM, so a missing
      * or unreadable card never holds up start-up.
@@ -671,7 +676,11 @@ void app_main(void)
      * actually chosen. If WiFi cannot be reached, the reset button clears the
      * setting back to Ethernet.
      */
-    if (net_mode == KVM_NET_ETHERNET) {
+    if (dual_net) {
+        ESP_LOGI(TAG, "boot: ethernet primary + wifi fallback");
+        ESP_ERROR_CHECK(ethernet_init());
+        ESP_ERROR_CHECK(kvm_wifi_init());
+    } else if (net_mode == KVM_NET_ETHERNET) {
         ESP_LOGI(TAG, "boot: ethernet");
         ESP_ERROR_CHECK(ethernet_init());
     } else {

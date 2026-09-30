@@ -408,6 +408,16 @@ menu "ESP-KVM"
                 Initial station password used when NVS has no saved WiFi setting.
                 Keep this empty in distributable firmware images.
 
+        config KVM_ETH_WIFI_FAILOVER
+            bool "Run Ethernet with WiFi fallback"
+            default n
+            depends on KVM_ETH_ENABLE && KVM_WIFI
+            help
+                Start Ethernet and WiFi station together. Ethernet has the higher
+                route priority; WiFi carries traffic whenever Ethernet is down.
+                Boards where both devices need the same SDMMC slot stay in the
+                normal single-link mode so storage and WiFi never fight for it.
+
         config KVM_ETH_RMII_CLK_GPIO
             int "RMII REFCLK GPIO (external input)"
             range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
