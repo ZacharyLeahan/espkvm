@@ -12,6 +12,18 @@ Smaller per-connection TCP buffers improved Wi-Fi stability in our test. Longer 
 
 **Xbox gamepad emulation is not implemented.** See the [controller proposal](docs/XBOX-REMOTE-CONTROLLER.md).
 
+## Xbox compatibility / recovery
+
+Observed on our hardware with build `70b054e9f`, local Wi-Fi, a 6-FPS stream cap, and JPEG quality 75:
+
+| Game / scenario | Detected HDMI input | Test duration | Streaming / recovery result |
+| --- | --- | --- | --- |
+| Guilty Gear Isuka | 720×480p60 | 10 minutes | Zero stream reconnects or ESP resets; 4.74 delivered FPS average with two viewers. |
+| Xbox reboot → dashboard | 1280×720p60 after boot | One reboot; recovery time not measured | Capture resumed without an ESP reset; browser recovery without reloading not independently verified. |
+| Amped 2 | 1280×720p60 | Short check; duration not recorded | Capture about 60 FPS; device reported 5.83 published FPS. Long-run and transition recovery not yet verified. |
+
+These are observations, not blanket compatibility guarantees. Zero reconnects does not mean zero frame gaps. [Detailed test notes](docs/XBOX-CAPTURE-DEBUG.md#sustained-wi-fi-investigation-2026-09-30).
+
 ## Our hardware
 
 | Part | Bought from | Our order total (USD) |
