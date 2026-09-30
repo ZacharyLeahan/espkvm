@@ -35,6 +35,7 @@
 #include "hal/mipi_csi_types.h"
 #include "soc/clk_tree_defs.h"
 #include "soc/isp_struct.h"
+#include "soc/dw_gdma_struct.h"
 #include "soc/mipi_csi_bridge_struct.h"
 #include "soc/mipi_csi_host_struct.h"
 
@@ -183,6 +184,32 @@ void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes)
              fb_bytes, gdma_64b, (unsigned)c->hres, (unsigned)c->vres, bpp, c->csi_get_new_irqs,
              c->csi_dma_done_irqs, c->ping_fb_idx, (void *)c->done_fb);
     ESP_LOGW(CAPTURE_LOG_TAG, "  esp_cam: csi_transfer_size=%" PRIu32 "x64b (=hxvxin_bpp/64); RGB888 in_bpp=24, wire datatype must match", gdma_64b);
+    for (unsigned ch = 0; ch < 4; ++ch) {
+        ESP_LOGW(CAPTURE_LOG_TAG, "  DMA%u dst=%08" PRIx32 " block=%" PRIu32 " done=%" PRIu32 " fifo=%" PRIu32 " irq=%08" PRIx32,
+                 ch, DW_GDMA.ch[ch].dar0.val, DW_GDMA.ch[ch].block_ts0.val,
+                 DW_GDMA.ch[ch].status0.val, DW_GDMA.ch[ch].status1.val,
+                 DW_GDMA.ch[ch].int_st0.val);
+        if (DW_GDMA.ch[ch].sar0.val == MIPI_CSI_BRG_MEM_BASE) {
+            const uint32_t dst = DW_GDMA.ch[ch].dar0.val;
+            ESP_LOGW(CAPTURE_LOG_TAG,
+                     "  CSI DMA%u ctl0=%08" PRIx32 " ctl1=%08" PRIx32
+                     " cfg0=%08" PRIx32 " cfg1=%08" PRIx32,
+                     ch, DW_GDMA.ch[ch].ctl0.val, DW_GDMA.ch[ch].ctl1.val,
+                     DW_GDMA.ch[ch].cfg0.val, DW_GDMA.ch[ch].cfg1.val);
+            /* Register progress is not a guarantee of valid pixels. Identify
+             * the actual destination buffer rather than assuming buffer 0. */
+            for (unsigned k = 0; k <= CAPTURE_FB_COUNT; ++k) {
+                const uintptr_t base = (uintptr_t)(k < CAPTURE_FB_COUNT ? c->fb[k] : c->drop_fb);
+                if (base && dst >= base && dst - base <= fb_bytes) {
+                    const size_t offset = dst - base;
+                    ESP_LOGW(CAPTURE_LOG_TAG,
+                             "  CSI DMA progress: buffer=%u offset=%zu expected=%zu remaining=%zu",
+                             k, offset, fb_bytes, fb_bytes - offset);
+                    break;
+                }
+            }
+        }
+    }
     {
         uint32_t dtc = MIPI_CSI_BRIDGE.data_type_cfg.val;
         unsigned lo = (unsigned)(dtc & 0x3fu);
@@ -203,9 +230,9 @@ void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes)
         uint32_t ir = MIPI_CSI_BRIDGE.int_raw.val;
         uint32_t ist = MIPI_CSI_BRIDGE.int_st.val;
         uint32_t iena = MIPI_CSI_BRIDGE.int_ena.val;
-        uint32_t m = ist & 0x3fu;
+        uint32_t m = ir & 0x3fu;
         ESP_LOGW(CAPTURE_LOG_TAG, "  BRG int raw=0x%08" PRIx32 " st=0x%08" PRIx32 " ena=0x%08" PRIx32
-                                 " | st: vadr_gt:%u vadr_lt:%u discard:%u overrun:%u fifo_ovf:%u dma_upd:%u",
+                                 " | raw: expected_gt_actual:%u expected_lt_actual:%u discard:%u overrun:%u fifo_ovf:%u dma_upd:%u",
                  ir, ist, iena, (unsigned)(m >> 0) & 1u, (unsigned)(m >> 1) & 1u, (unsigned)(m >> 2) & 1u, (unsigned)(m >> 3) & 1u,
                  (unsigned)(m >> 4) & 1u, (unsigned)(m >> 5) & 1u);
     }
@@ -345,14 +372,38 @@ static bool IRAM_ATTR cam_on_done(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t 
  * rewriting the bridge registers would leave the DMA expecting the old frame
  * size and every capture would time out.
  */
+#if !CONFIG_KVM_CAPTURE_DEBUG_RGB
+static unsigned capture_csi_lanes_for_mode(uint32_t hres, uint32_t vres, uint32_t hz)
+{
+    /* Size the link from active video rather than a resolution lookup table:
+     * an Xbox may change both geometry and refresh rate while launching a
+     * title. Leave 20% for CSI packet overhead and clock tolerance. Unknown
+     * rates are treated as 60 Hz. This is an experimental bandwidth-based
+     * selection, not a verified cure for the Xbox 480p capture stall: both one
+     * and two lanes have stalled on the current board. */
+    const uint64_t refresh = hz ? hz : 60u;
+    const uint64_t required_bps = (uint64_t)hres * vres * refresh * capture_csi_bpp();
+    const uint64_t usable_lane_bps =
+        (uint64_t)KVM_BOARD_MIPI_LANE_MBPS * 1000000u * 80u / 100u;
+    return required_bps <= usable_lane_bps ? 1u : 2u;
+}
+#endif
+
 static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
 {
+#if CONFIG_KVM_CAPTURE_DEBUG_RGB
+    const unsigned lanes = 2u;
+#else
+    const unsigned lanes = kvm_bridge_has_variable_csi_lanes(&c->bridge)
+                               ? capture_csi_lanes_for_mode(hres, vres, c->input_hz)
+                               : 2u;
+#endif
     esp_cam_ctlr_csi_config_t csi_cfg = {
         .ctlr_id = 0,
         .clk_src = MIPI_CSI_PHY_CLK_SRC_DEFAULT,
         .h_res = hres,
         .v_res = vres,
-        .data_lane_num = 2,
+        .data_lane_num = lanes,
         .lane_bit_rate_mbps = KVM_BOARD_MIPI_LANE_MBPS,
         .queue_items = CAPTURE_FB_COUNT,
         .byte_swap_en = false,
@@ -378,6 +429,12 @@ static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     };
     capture_fill_esp_cam_color_types(&csi_cfg, &isp_cfg);
 
+    ESP_RETURN_ON_FALSE(capture_tc_lock(c, 2000), ESP_ERR_TIMEOUT, CAPTURE_LOG_TAG,
+                        "bridge busy while setting CSI lanes");
+    esp_err_t lane_err = kvm_bridge_set_csi_lanes(&c->bridge, lanes);
+    capture_tc_unlock(c);
+    ESP_RETURN_ON_ERROR(lane_err, CAPTURE_LOG_TAG, "bridge CSI lanes");
+
     ESP_RETURN_ON_ERROR(esp_cam_new_csi_ctlr(&csi_cfg, &s_cam), CAPTURE_LOG_TAG, "csi ctlr");
 
     esp_cam_ctlr_evt_cbs_t cbs = {
@@ -390,6 +447,12 @@ static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     ISP.cntl.isp_en = 0;
     capture_configure_p4_csi_bridge(hres, vres);
     return ESP_OK;
+}
+
+/* The bridge is configured before starting the receiver. */
+static esp_err_t csi_start(void)
+{
+    return esp_cam_ctlr_start(s_cam);
 }
 
 /*
@@ -595,6 +658,7 @@ capture_ctx_t *capture_hw_init_start(void)
         hres = t.hact;
         vres = t.vact;
         s_cap.signal_present = true;
+        s_cap.input_hz = t.hz;
         capture_status_set_signal(true, t.sys_status);
         char mode[32];
         mode_name(mode, sizeof(mode), t.hact, t.vact, &t);
@@ -613,8 +677,13 @@ capture_ctx_t *capture_hw_init_start(void)
     s_cap.frame_bytes = (size_t)hres * (size_t)vres * capture_pixfmt_bytes();
     capture_status_set_mode(hres, vres, t.interlaced);
 
-    ESP_ERROR_CHECK(esp_cam_ctlr_start(s_cam));
+    ESP_ERROR_CHECK(csi_start());
     ESP_LOGI(CAPTURE_LOG_TAG, "capture running at %ux%u", hres, vres);
+#if CONFIG_KVM_TC358743_ADV_DEBUG
+    for (unsigned k = 0; k < CAPTURE_FB_COUNT; ++k) {
+        ESP_LOGI(CAPTURE_LOG_TAG, "capture buffer %u: %p", k, s_cap.fb[k]);
+    }
+#endif
 
     kvm_cap_report(KVM_CAP_VIDEO, true, NULL);
     return &s_cap;
@@ -659,9 +728,9 @@ esp_err_t capture_hw_apply_mode(capture_ctx_t *c, uint32_t hres, uint32_t vres)
         ESP_LOGE(CAPTURE_LOG_TAG, "csi_create for %ux%u: %s", hres, vres, esp_err_to_name(er));
         return er;
     }
-    er = esp_cam_ctlr_start(s_cam);
+    er = csi_start();
     if (er != ESP_OK) {
-        ESP_LOGE(CAPTURE_LOG_TAG, "esp_cam_ctlr_start: %s", esp_err_to_name(er));
+        ESP_LOGE(CAPTURE_LOG_TAG, "CSI start: %s", esp_err_to_name(er));
         return er;
     }
     capture_status_set_mode(hres, vres, false);
@@ -739,6 +808,7 @@ esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
     if (kvm_bridge_get_timings(&c->bridge, &t) == ESP_OK && kvm_bridge_timings_valid(&t)) {
         hres = t.hact;
         vres = t.vact;
+        c->input_hz = t.hz;
     }
     capture_tc_unlock(c);
 
@@ -749,9 +819,9 @@ esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
         ESP_LOGE(CAPTURE_LOG_TAG, "csi_create after recover: %s", esp_err_to_name(er));
         return er;
     }
-    er = esp_cam_ctlr_start(s_cam);
+    er = csi_start();
     if (er != ESP_OK) {
-        ESP_LOGE(CAPTURE_LOG_TAG, "esp_cam_ctlr_start after recover: %s", esp_err_to_name(er));
+        ESP_LOGE(CAPTURE_LOG_TAG, "CSI start after recover: %s", esp_err_to_name(er));
         return er;
     }
     capture_status_set_mode(hres, vres, t.interlaced);
@@ -962,6 +1032,7 @@ static void capture_monitor_task(void *arg)
                 ESP_LOGI(CAPTURE_LOG_TAG, "HDMI %s fits the CSI link; restarting capture", mode);
                 c->pending_hres = candidate_h;
                 c->pending_vres = candidate_v;
+                c->pending_hz = t.hz;
                 c->mode_change_pending = true;
                 xSemaphoreGive(c->csi_done_sem);
             }
@@ -977,12 +1048,14 @@ static void capture_monitor_task(void *arg)
              * was away the CSI side stopped delivering. */
             c->pending_hres = candidate_h;
             c->pending_vres = candidate_v;
+            c->pending_hz = t.hz;
             c->mode_change_pending = true;
             xSemaphoreGive(c->csi_done_sem);
         } else if (mode_differs && !c->mode_change_pending) {
             ESP_LOGI(CAPTURE_LOG_TAG, "input mode %ux%u -> %s", c->hres, c->vres, mode);
             c->pending_hres = candidate_h;
             c->pending_vres = candidate_v;
+            c->pending_hz = t.hz;
             c->mode_change_pending = true;
             xSemaphoreGive(c->csi_done_sem);
         }

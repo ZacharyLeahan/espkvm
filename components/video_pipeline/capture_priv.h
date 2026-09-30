@@ -73,6 +73,8 @@ typedef struct {
     /** Mode currently programmed into the CSI bridge. */
     uint32_t hres;
     uint32_t vres;
+    /** Refresh rate used to size the active CSI link (0 when unknown). */
+    uint32_t input_hz;
     size_t frame_bytes;
     void *fb[CAPTURE_FB_COUNT];
     /** Where the DMA writes a frame that is being dropped. Ours, allocated once:
@@ -112,6 +114,7 @@ typedef struct {
     volatile bool mode_change_pending;
     volatile uint32_t pending_hres;
     volatile uint32_t pending_vres;
+    volatile uint32_t pending_hz;
     /** The input mode needs more than the CSI lanes carry: no frames will come. */
     volatile bool mode_too_fast;
 } capture_ctx_t;

@@ -207,6 +207,15 @@ menu "ESP-KVM"
                 When enabled, CSI frame timeouts log extra TC358743 register state, AVI
                 infoframe dumps, and periodic bridge status. Adds I2C traffic on error paths.
                 Boot-time SYS_STATUS lines from init are unchanged.
+
+        config KVM_CAPTURE_DEBUG_RGB
+            bool "Diagnostic: use RGB capture instead of direct YUV"
+            depends on KVM_TC358743_ADV_DEBUG && !KVM_LT6911
+            default n
+            help
+                Use the existing RGB capture and conversion path to isolate
+                format-dependent CSI failures. This increases frame memory and
+                conversion work; leave disabled for normal performance testing.
     endmenu
 
     menu "Board pins"
@@ -392,6 +401,31 @@ menu "ESP-KVM"
                 Not tied to Ethernet: a board with no wired port still answers to
                 this name over WiFi, and it is also what the certificate and the
                 device's own CA are named after.
+
+        config KVM_WIFI_DEFAULT_SSID
+            string "Default WiFi network (SSID)"
+            default ""
+            depends on KVM_WIFI
+            help
+                Initial station SSID used when NVS has no saved WiFi setting.
+
+        config KVM_WIFI_DEFAULT_PASSWORD
+            string "Default WiFi password"
+            default ""
+            depends on KVM_WIFI
+            help
+                Initial station password used when NVS has no saved WiFi setting.
+                Keep this empty in distributable firmware images.
+
+        config KVM_ETH_WIFI_FAILOVER
+            bool "Run Ethernet with WiFi fallback"
+            default n
+            depends on KVM_ETH_ENABLE && KVM_WIFI
+            help
+                Start Ethernet and WiFi station together. Ethernet has the higher
+                route priority; WiFi carries traffic whenever Ethernet is down.
+                Boards where both devices need the same SDMMC slot stay in the
+                normal single-link mode so storage and WiFi never fight for it.
 
         config KVM_ETH_RMII_CLK_GPIO
             int "RMII REFCLK GPIO (external input)"

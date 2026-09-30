@@ -12,6 +12,12 @@
 
 #include "sdkconfig.h"
 
+#ifdef CONFIG_KVM_ENABLE_HTTPS
+#define KVM_SECURITY_DEFAULT 1
+#else
+#define KVM_SECURITY_DEFAULT 0
+#endif
+
 /* Derive an ENUM's .max from its choices array so the two can't drift
  * (the schema iterates choices[0..max]; a short array reads OOB). */
 #define ENUM_MAX(arr) ((int)(sizeof(arr) / sizeof((arr)[0]) - 1))
@@ -646,14 +652,14 @@ static const kvm_setting_t s_settings[] = {
         .key = "wifi_ssid", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
         .title = "WiFi network (SSID)",
         .help = "The name of the network to join in \"wifi\" mode.",
-        .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_WIFI,
+        .def_str = CONFIG_KVM_WIFI_DEFAULT_SSID, .max_len = 32, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_REBOOT,
     },
     {
         .key = "wifi_pass", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
         .title = "WiFi password",
         .help = "Left blank for an open network. Stored write-only.",
-        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
+        .def_str = CONFIG_KVM_WIFI_DEFAULT_PASSWORD, .max_len = 63, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
     },
     {
@@ -904,12 +910,12 @@ static const kvm_setting_t s_settings[] = {
         .title = "Serve over HTTPS",
         .help = "Uses a self-signed certificate generated on first boot. Disable only "
                 "on a trusted network or behind a VPN.",
-        .def = 1, .requires_cap = KVM_CAP_HTTPS, .flags = KVM_SF_REBOOT,
+        .def = KVM_SECURITY_DEFAULT, .requires_cap = KVM_CAP_HTTPS, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "sec_auth", .section = "security", .type = KVM_VT_BOOL,
         .title = "Require login",
-        .def = 1, .requires_cap = KVM_CAP_HTTPS, .flags = KVM_SF_REBOOT,
+        .def = KVM_SECURITY_DEFAULT, .requires_cap = KVM_CAP_HTTPS, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "sec_user", .section = "security", .type = KVM_VT_STR,

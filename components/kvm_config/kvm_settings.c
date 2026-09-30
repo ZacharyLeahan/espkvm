@@ -179,6 +179,13 @@ int32_t kvm_setting_int(const char *key)
 
 bool kvm_setting_bool(const char *key)
 {
+#if !CONFIG_KVM_ENABLE_HTTPS
+    /* A build made for a VPN-only deployment must not resurrect TLS or the
+     * login merely because NVS was written by an earlier HTTPS build. */
+    if (key && (strcmp(key, "sec_https") == 0 || strcmp(key, "sec_auth") == 0)) {
+        return false;
+    }
+#endif
     return kvm_setting_int(key) != 0;
 }
 

@@ -416,7 +416,9 @@ static void sleep_mode(tc358743_t *d, bool enable)
 static void enable_stream(tc358743_t *d, bool enable)
 {
     if (enable) {
-        /* Non-continuous MIPI clock: leave TXOPTIONCNTRL as set_csi() left it (0); matches p4kvm / Linux. */
+        /* set_csi_lanes() resets and starts the transmitter in the
+         * non-continuous clock mode used by the reference driver. */
+        wr32(d, TXOPTIONCNTRL, 0);
         wr8(d, VI_MUTE, MASK_AUTO_MUTE);
     } else {
         wr8(d, VI_MUTE, MASK_AUTO_MUTE | MASK_VI_MUTE);
@@ -607,21 +609,11 @@ static void set_csi_lanes(tc358743_t *d, unsigned lanes)
 
     reset_blocks(d, MASK_CTXRST);
 
-    if (lanes < 1) {
-        wr32(d, CLW_CNTRL, MASK_CLW_LANEDISABLE);
-    }
-    if (lanes < 1) {
-        wr32(d, D0W_CNTRL, MASK_D0W_LANEDISABLE);
-    }
-    if (lanes < 2) {
-        wr32(d, D1W_CNTRL, MASK_D1W_LANEDISABLE);
-    }
-    if (lanes < 3) {
-        wr32(d, D2W_CNTRL, MASK_D2W_LANEDISABLE);
-    }
-    if (lanes < 4) {
-        wr32(d, D3W_CNTRL, MASK_D3W_LANEDISABLE);
-    }
+    wr32(d, CLW_CNTRL, lanes >= 1 ? 0 : MASK_CLW_LANEDISABLE);
+    wr32(d, D0W_CNTRL, lanes >= 1 ? 0 : MASK_D0W_LANEDISABLE);
+    wr32(d, D1W_CNTRL, lanes >= 2 ? 0 : MASK_D1W_LANEDISABLE);
+    wr32(d, D2W_CNTRL, lanes >= 3 ? 0 : MASK_D2W_LANEDISABLE);
+    wr32(d, D3W_CNTRL, lanes >= 4 ? 0 : MASK_D3W_LANEDISABLE);
 
     wr32(d, LINEINITCNT, pdata->lineinitcnt);
     wr32(d, LPTXTIMECNT, pdata->lptxtimecnt);
@@ -645,12 +637,27 @@ static void set_csi_lanes(tc358743_t *d, unsigned lanes)
 
     uint32_t nol = (lanes == 4) ? MASK_NOL_4 : (lanes == 3) ? MASK_NOL_3 : (lanes == 2) ? MASK_NOL_2 : MASK_NOL_1;
 
+    /* MODE_SET ORs bits into CSI_CONTROL. Clear the lane field first so a
+     * two-to-one lane transition can replace the old nonzero lane count. */
+    wr32(d, CSI_CONFW, MASK_MODE_CLEAR | MASK_ADDRESS_CSI_CONTROL | MASK_NOL_4);
     wr32(d, CSI_CONFW, MASK_MODE_SET | MASK_ADDRESS_CSI_CONTROL | MASK_CSI_MODE | MASK_TXHSMD | nol);
     wr32(d, CSI_CONFW, MASK_MODE_SET | MASK_ADDRESS_CSI_ERR_INTENA | MASK_TXBRK | MASK_QUNK | MASK_WCER | MASK_INER);
 
     wr32(d, CSI_CONFW, MASK_MODE_CLEAR | MASK_ADDRESS_CSI_ERR_HALT | MASK_TXBRK | MASK_QUNK);
 
     wr32(d, CSI_CONFW, MASK_MODE_SET | MASK_ADDRESS_CSI_INT_ENA | MASK_INTER);
+}
+
+esp_err_t tc358743_set_csi_lanes(tc358743_t *d, unsigned lanes)
+{
+    ESP_RETURN_ON_FALSE(d && lanes >= 1 && lanes <= 4, ESP_ERR_INVALID_ARG, TAG, "CSI lanes");
+    enable_stream(d, false);
+    d->cfg.lanes = lanes;
+    set_csi_lanes(d, lanes);
+    apply_csi_color_space(d);
+    enable_stream(d, true);
+    ESP_LOGI(TAG, "CSI data lanes: %u", lanes);
+    return ESP_OK;
 }
 
 static void hpd_set(tc358743_t *d, bool on)
@@ -870,7 +877,9 @@ static uint16_t tc358743_read_hact_vact_htotal(tc358743_t *d, uint16_t *vact, ui
     uint8_t vt1 = rd8(d, VTOTAL1);
     *vact = (uint16_t)v0 | (uint16_t)((v1 & 0x1fu) << 8);
     *htotal = (uint16_t)ht0 | (uint16_t)((ht1 & 0x1fu) << 8);
-    *vtotal = (uint16_t)vt0 | (uint16_t)((vt1 & 0x3fu) << 8);
+    /* V_SIZE is stored in half-lines for both progressive and interlaced
+     * inputs. A 480p source therefore reports 1050, not 525. */
+    *vtotal = ((uint16_t)vt0 | (uint16_t)((vt1 & 0x3fu) << 8)) / 2u;
     return (uint16_t)h0 | (uint16_t)((h1 & 0x1fu) << 8);
 }
 

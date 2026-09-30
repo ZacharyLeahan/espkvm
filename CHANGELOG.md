@@ -7,6 +7,18 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Added
+- Advanced capture diagnostics report completed-frame counts separately from
+  published FPS, plus CSI DMA configuration and buffer-relative progress at
+  stalls. These diagnostics do not fix the outstanding Xbox 480p failure.
+- Opt-in RGB capture diagnostic for comparing the existing RGB and direct-YUV
+  paths on TC358743 boards. Disabled by default; not a performance preset.
+
+### Fixed
+- Experimental TC358743 lane selection follows the detected input bandwidth.
+  Xbox 720p-to-480p transition testing is still in progress; this is not yet a
+  validated automatic-resolution baseline.
+
 ## [0.56.0] - 2026-09-29
 
 ### Added

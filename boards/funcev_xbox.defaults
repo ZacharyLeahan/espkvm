@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Apply after sdkconfig.defaults and boards/funcev_p4.defaults.
+# Experimental Function EV rev 3.x + C790 Xbox configuration; no credentials.
+CONFIG_KVM_ENABLE_HTTPS=n
+CONFIG_KVM_MDNS_HOSTNAME="esp"
+CONFIG_KVM_ETH_WIFI_FAILOVER=y
+CONFIG_KVM_MIPI_LANE_MBPS=972
+CONFIG_KVM_TC358743_ADV_DEBUG=y
+CONFIG_KVM_CAPTURE_DEBUG_RGB=y
+CONFIG_ESP_HOSTED_HOST_SDIO_RX_Q_SIZE=64
+CONFIG_ESP_HOSTED_HOST_SDIO_TX_Q_SIZE=32

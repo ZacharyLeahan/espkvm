@@ -62,6 +62,13 @@ comes through as text.
 > receiver - was solved there first, and this project would not exist without
 > it. See [Credits](#credits).
 
+> **ZacharyLeahan's experimental Xbox fork of [espkvm/espkvm](https://github.com/espkvm/espkvm).**
+> Work lives on `xbox-experiments`; this is not an upstream release. See
+> [build instructions and limitations](docs/XBOX-FORK.md). The hardware and firmware changes used for the
+> ESP32-P4 Function EV Board + Geekworm C790 build, together with the proposed
+> original Xbox remote-controller mode and its code provenance, are documented
+> in [Original Xbox remote-controller experiment](docs/XBOX-REMOTE-CONTROLLER.md).
+
 ## Status
 
 Useful for what it does today, and honest about the rest.
