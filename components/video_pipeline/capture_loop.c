@@ -119,9 +119,36 @@ void capture_loop_run(capture_ctx_t *c)
     int64_t last_encode_us = 0;
     /* Set after anything that invalidates what clients are holding. */
     bool force_publish = true;
+#if CONFIG_KVM_TC358743_ADV_DEBUG
+    int64_t capture_sample_us = esp_timer_get_time();
+    uint32_t capture_sample_done = c->csi_dma_done_irqs;
+    uint32_t capture_sample_h = c->hres, capture_sample_v = c->vres;
+#endif
 
     while (1) {
         esp_task_wdt_reset();
+#if CONFIG_KVM_TC358743_ADV_DEBUG
+        /* Published FPS can be zero for a static screen. Measure the capture
+         * callbacks separately, including when no browser is connected. */
+        const int64_t sample_now = esp_timer_get_time();
+        const uint32_t sample_done = c->csi_dma_done_irqs;
+        if (c->hres != capture_sample_h || c->vres != capture_sample_v ||
+            sample_done < capture_sample_done) {
+            capture_sample_us = sample_now;
+            capture_sample_done = sample_done;
+            capture_sample_h = c->hres;
+            capture_sample_v = c->vres;
+        } else if (sample_now - capture_sample_us >= 5000000) {
+            const uint32_t elapsed_ms = (uint32_t)((sample_now - capture_sample_us) / 1000);
+            const uint32_t frames = sample_done - capture_sample_done;
+            ESP_LOGI(CAPTURE_LOG_TAG,
+                     "capture sample: %ux%u completed=%lu elapsed_ms=%lu viewers=%d",
+                     (unsigned)c->hres, (unsigned)c->vres, (unsigned long)frames,
+                     (unsigned long)elapsed_ms, (int)video_frame_viewer_count());
+            capture_sample_us = sample_now;
+            capture_sample_done = sample_done;
+        }
+#endif
         /*
          * No codec is open: every path out of here closed one and could not
          * open another, which on this device means memory. Keep the loop alive

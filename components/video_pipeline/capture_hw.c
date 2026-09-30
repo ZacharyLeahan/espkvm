@@ -35,6 +35,7 @@
 #include "hal/mipi_csi_types.h"
 #include "soc/clk_tree_defs.h"
 #include "soc/isp_struct.h"
+#include "soc/dw_gdma_struct.h"
 #include "soc/mipi_csi_bridge_struct.h"
 #include "soc/mipi_csi_host_struct.h"
 
@@ -183,6 +184,32 @@ void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes)
              fb_bytes, gdma_64b, (unsigned)c->hres, (unsigned)c->vres, bpp, c->csi_get_new_irqs,
              c->csi_dma_done_irqs, c->ping_fb_idx, (void *)c->done_fb);
     ESP_LOGW(CAPTURE_LOG_TAG, "  esp_cam: csi_transfer_size=%" PRIu32 "x64b (=hxvxin_bpp/64); RGB888 in_bpp=24, wire datatype must match", gdma_64b);
+    for (unsigned ch = 0; ch < 4; ++ch) {
+        ESP_LOGW(CAPTURE_LOG_TAG, "  DMA%u dst=%08" PRIx32 " block=%" PRIu32 " done=%" PRIu32 " fifo=%" PRIu32 " irq=%08" PRIx32,
+                 ch, DW_GDMA.ch[ch].dar0.val, DW_GDMA.ch[ch].block_ts0.val,
+                 DW_GDMA.ch[ch].status0.val, DW_GDMA.ch[ch].status1.val,
+                 DW_GDMA.ch[ch].int_st0.val);
+        if (DW_GDMA.ch[ch].sar0.val == MIPI_CSI_BRG_MEM_BASE) {
+            const uint32_t dst = DW_GDMA.ch[ch].dar0.val;
+            ESP_LOGW(CAPTURE_LOG_TAG,
+                     "  CSI DMA%u ctl0=%08" PRIx32 " ctl1=%08" PRIx32
+                     " cfg0=%08" PRIx32 " cfg1=%08" PRIx32,
+                     ch, DW_GDMA.ch[ch].ctl0.val, DW_GDMA.ch[ch].ctl1.val,
+                     DW_GDMA.ch[ch].cfg0.val, DW_GDMA.ch[ch].cfg1.val);
+            /* Register progress is not a guarantee of valid pixels. Identify
+             * the actual destination buffer rather than assuming buffer 0. */
+            for (unsigned k = 0; k <= CAPTURE_FB_COUNT; ++k) {
+                const uintptr_t base = (uintptr_t)(k < CAPTURE_FB_COUNT ? c->fb[k] : c->drop_fb);
+                if (base && dst >= base && dst - base <= fb_bytes) {
+                    const size_t offset = dst - base;
+                    ESP_LOGW(CAPTURE_LOG_TAG,
+                             "  CSI DMA progress: buffer=%u offset=%zu expected=%zu remaining=%zu",
+                             k, offset, fb_bytes, fb_bytes - offset);
+                    break;
+                }
+            }
+        }
+    }
     {
         uint32_t dtc = MIPI_CSI_BRIDGE.data_type_cfg.val;
         unsigned lo = (unsigned)(dtc & 0x3fu);
@@ -203,9 +230,9 @@ void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes)
         uint32_t ir = MIPI_CSI_BRIDGE.int_raw.val;
         uint32_t ist = MIPI_CSI_BRIDGE.int_st.val;
         uint32_t iena = MIPI_CSI_BRIDGE.int_ena.val;
-        uint32_t m = ist & 0x3fu;
+        uint32_t m = ir & 0x3fu;
         ESP_LOGW(CAPTURE_LOG_TAG, "  BRG int raw=0x%08" PRIx32 " st=0x%08" PRIx32 " ena=0x%08" PRIx32
-                                 " | st: vadr_gt:%u vadr_lt:%u discard:%u overrun:%u fifo_ovf:%u dma_upd:%u",
+                                 " | raw: expected_gt_actual:%u expected_lt_actual:%u discard:%u overrun:%u fifo_ovf:%u dma_upd:%u",
                  ir, ist, iena, (unsigned)(m >> 0) & 1u, (unsigned)(m >> 1) & 1u, (unsigned)(m >> 2) & 1u, (unsigned)(m >> 3) & 1u,
                  (unsigned)(m >> 4) & 1u, (unsigned)(m >> 5) & 1u);
     }
@@ -646,6 +673,11 @@ capture_ctx_t *capture_hw_init_start(void)
 
     ESP_ERROR_CHECK(csi_start());
     ESP_LOGI(CAPTURE_LOG_TAG, "capture running at %ux%u", hres, vres);
+#if CONFIG_KVM_TC358743_ADV_DEBUG
+    for (unsigned k = 0; k < CAPTURE_FB_COUNT; ++k) {
+        ESP_LOGI(CAPTURE_LOG_TAG, "capture buffer %u: %p", k, s_cap.fb[k]);
+    }
+#endif
 
     kvm_cap_report(KVM_CAP_VIDEO, true, NULL);
     return &s_cap;
