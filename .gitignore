@@ -37,6 +37,9 @@ flasher_args.json # Generated in build directory
 sdkconfig.old
 sdkconfig
 boards/*private.defaults
+.env
+.env.*
+!.env.example
 
 # ESP-IDF dependencies
 # For older versions or manual component management

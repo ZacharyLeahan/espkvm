@@ -23,8 +23,29 @@ Use ESP-IDF 6.1 and initialize submodules:
 git clone --recursive --branch xbox-experiments https://github.com/ZacharyLeahan/espkvm.git
 cd espkvm
 . tools/env.sh
-idf.py -B build.xbox -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/funcev_p4.defaults;boards/funcev_xbox.defaults" build
+# Optional: copy .env.example to .env and fill in WIFI_SSID and WIFI_PASSWORD.
+cp .env.example .env
+python3 tools/build_xbox.py
 ```
+
+Skip the copy if you already have a `.env` (do not overwrite your settings), or
+if you prefer to configure Wi-Fi on the device. Edit `.env` in a text editor.
+Keep the example's quoted format; values are literal, not shell commands.
+The helper reads `.env` automatically and builds in ignored `build.xbox-local`.
+Use `python3 tools/build_xbox.py --configure-only` to generate the configuration
+without compiling. No third-party dotenv package is required.
+
+Changing `.env` replaces the two build defaults even on an existing local build;
+removing it resets those defaults to empty. Saved device Wi-Fi settings in NVS
+still take precedence: this does not replace credentials already saved on the
+device. Configure those through the device settings; do not erase storage just
+to change the network.
+
+**Never publish this local firmware if you embed real credentials.** `.env`,
+generated defaults, sdkconfig, and compiled binaries can contain the password.
+Git ignores them, but that does not encrypt them or make a binary safe to share.
+Tailscale authentication keys are not accepted by this helper; configure them
+on the device. The script builds only; it does not flash or reset the hardware.
 
 The public profile is credential-free. Configure Wi-Fi and Tailscale locally.
 Private board defaults, sdkconfig, build artifacts, passwords and authentication

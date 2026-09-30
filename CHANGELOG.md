@@ -8,6 +8,8 @@ bumps the patch).
 ## [Unreleased]
 
 ### Added
+- Optional ignored `.env` Wi-Fi defaults, a credential-free `.env.example`, and
+  a local Xbox build helper. Credentials are never intended for shared firmware.
 - Advanced capture diagnostics report completed-frame counts separately from
   published FPS, plus CSI DMA configuration and buffer-relative progress at
   stalls. These diagnostics do not fix the outstanding Xbox 480p failure.
