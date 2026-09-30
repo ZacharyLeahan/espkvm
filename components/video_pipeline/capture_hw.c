@@ -372,6 +372,7 @@ static bool IRAM_ATTR cam_on_done(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t 
  * rewriting the bridge registers would leave the DMA expecting the old frame
  * size and every capture would time out.
  */
+#if !CONFIG_KVM_CAPTURE_DEBUG_RGB
 static unsigned capture_csi_lanes_for_mode(uint32_t hres, uint32_t vres, uint32_t hz)
 {
     /* Size the link from active video rather than a resolution lookup table:
@@ -386,12 +387,17 @@ static unsigned capture_csi_lanes_for_mode(uint32_t hres, uint32_t vres, uint32_
         (uint64_t)KVM_BOARD_MIPI_LANE_MBPS * 1000000u * 80u / 100u;
     return required_bps <= usable_lane_bps ? 1u : 2u;
 }
+#endif
 
 static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
 {
+#if CONFIG_KVM_CAPTURE_DEBUG_RGB
+    const unsigned lanes = 2u;
+#else
     const unsigned lanes = kvm_bridge_has_variable_csi_lanes(&c->bridge)
                                ? capture_csi_lanes_for_mode(hres, vres, c->input_hz)
                                : 2u;
+#endif
     esp_cam_ctlr_csi_config_t csi_cfg = {
         .ctlr_id = 0,
         .clk_src = MIPI_CSI_PHY_CLK_SRC_DEFAULT,

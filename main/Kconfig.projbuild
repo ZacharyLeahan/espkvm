@@ -207,6 +207,15 @@ menu "ESP-KVM"
                 When enabled, CSI frame timeouts log extra TC358743 register state, AVI
                 infoframe dumps, and periodic bridge status. Adds I2C traffic on error paths.
                 Boot-time SYS_STATUS lines from init are unchanged.
+
+        config KVM_CAPTURE_DEBUG_RGB
+            bool "Diagnostic: use RGB capture instead of direct YUV"
+            depends on KVM_TC358743_ADV_DEBUG && !KVM_LT6911
+            default n
+            help
+                Use the existing RGB capture and conversion path to isolate
+                format-dependent CSI failures. This increases frame memory and
+                conversion work; leave disabled for normal performance testing.
     endmenu
 
     menu "Board pins"
