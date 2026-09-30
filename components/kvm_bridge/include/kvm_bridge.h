@@ -79,6 +79,7 @@ typedef struct {
     esp_err_t (*init_streaming)(void *dev);
     esp_err_t (*set_edid_profile)(void *dev, kvm_bridge_edid_profile_t profile);
     void (*set_csi_uyvy422)(void *dev, bool uyvy422);
+    esp_err_t (*set_csi_lanes)(void *dev, unsigned lanes);
     esp_err_t (*enable_hdmi_output)(void *dev);
     esp_err_t (*hotplug_reset)(void *dev);
     esp_err_t (*reapply_csi_path)(void *dev);
@@ -174,6 +175,14 @@ static inline void kvm_bridge_set_csi_uyvy422(const kvm_bridge_t *b, bool uyvy42
     if (b->ops->set_csi_uyvy422) {
         b->ops->set_csi_uyvy422(b->dev, uyvy422);
     }
+}
+static inline esp_err_t kvm_bridge_set_csi_lanes(const kvm_bridge_t *b, unsigned lanes)
+{
+    return b->ops->set_csi_lanes ? b->ops->set_csi_lanes(b->dev, lanes) : ESP_OK;
+}
+static inline bool kvm_bridge_has_variable_csi_lanes(const kvm_bridge_t *b)
+{
+    return b->ops->set_csi_lanes != NULL;
 }
 static inline esp_err_t kvm_bridge_enable_hdmi_output(const kvm_bridge_t *b)
 {

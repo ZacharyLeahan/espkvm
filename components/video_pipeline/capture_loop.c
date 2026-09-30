@@ -149,6 +149,7 @@ void capture_loop_run(capture_ctx_t *c)
         if (c->mode_change_pending) {
             const uint32_t want_h = c->pending_hres;
             const uint32_t want_v = c->pending_vres;
+            c->input_hz = c->pending_hz;
             c->mode_change_pending = false;
             esp_err_t me = capture_hw_apply_mode(c, want_h, want_v);
             if (me != ESP_OK) {

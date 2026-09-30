@@ -28,6 +28,11 @@ static void op_set_csi_uyvy422(void *dev, bool uyvy422)
     tc358743_set_csi_uyvy422((tc358743_t *)dev, uyvy422);
 }
 
+static esp_err_t op_set_csi_lanes(void *dev, unsigned lanes)
+{
+    return tc358743_set_csi_lanes((tc358743_t *)dev, lanes);
+}
+
 static esp_err_t op_enable_hdmi_output(void *dev)
 {
     return tc358743_enable_hdmi_output((tc358743_t *)dev);
@@ -77,6 +82,7 @@ static const kvm_bridge_ops_t s_ops = {
     .init_streaming = op_init_streaming,
     .set_edid_profile = op_set_edid_profile,
     .set_csi_uyvy422 = op_set_csi_uyvy422,
+    .set_csi_lanes = op_set_csi_lanes,
     .enable_hdmi_output = op_enable_hdmi_output,
     .hotplug_reset = op_hotplug_reset,
     .reapply_csi_path = op_reapply_csi_path,
