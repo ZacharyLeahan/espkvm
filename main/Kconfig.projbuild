@@ -393,6 +393,21 @@ menu "ESP-KVM"
                 this name over WiFi, and it is also what the certificate and the
                 device's own CA are named after.
 
+        config KVM_WIFI_DEFAULT_SSID
+            string "Default WiFi network (SSID)"
+            default ""
+            depends on KVM_WIFI
+            help
+                Initial station SSID used when NVS has no saved WiFi setting.
+
+        config KVM_WIFI_DEFAULT_PASSWORD
+            string "Default WiFi password"
+            default ""
+            depends on KVM_WIFI
+            help
+                Initial station password used when NVS has no saved WiFi setting.
+                Keep this empty in distributable firmware images.
+
         config KVM_ETH_RMII_CLK_GPIO
             int "RMII REFCLK GPIO (external input)"
             range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX

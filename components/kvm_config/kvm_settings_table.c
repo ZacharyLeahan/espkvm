@@ -646,14 +646,14 @@ static const kvm_setting_t s_settings[] = {
         .key = "wifi_ssid", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
         .title = "WiFi network (SSID)",
         .help = "The name of the network to join in \"wifi\" mode.",
-        .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_WIFI,
+        .def_str = CONFIG_KVM_WIFI_DEFAULT_SSID, .max_len = 32, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_REBOOT,
     },
     {
         .key = "wifi_pass", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
         .title = "WiFi password",
         .help = "Left blank for an open network. Stored write-only.",
-        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
+        .def_str = CONFIG_KVM_WIFI_DEFAULT_PASSWORD, .max_len = 63, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
     },
     {
@@ -675,7 +675,7 @@ static const kvm_setting_t s_settings[] = {
                 "in the log and on the display; for a hotspot with no password at "
                 "all, use the setting above. The network name is ESP-KVM-xxxx "
                 "(the device's MAC). Stored write-only.",
-        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
+        .def_str = CONFIG_KVM_WIFI_DEFAULT_PASSWORD, .max_len = 63, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
     },
     /* KVM_SF_SECRET means write-only over the API - and never in a log line.
