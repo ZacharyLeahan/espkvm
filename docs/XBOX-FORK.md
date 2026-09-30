@@ -9,9 +9,11 @@ https://github.com/ZacharyLeahan/espkvm, with no upstream pull request.
 ESP32-P4 Function EV rev 3.2 + Geekworm C790. The current diagnostic uses RGB888,
 two CSI lanes at 972 Mb/s, and MJPEG over HTTP. Dashboard 720p60 capture and the
 automatic switch into 480p60 game capture have worked at about 60 captured
-frames/sec. This is NOT browser throughput: the current stream tests are
-limited to 10 published FPS. Wi-Fi buffer exhaustion remains unresolved; the
-return transition on this exact build still needs validation. See
+frames/sec. With reduced TCP buffers, a ten-minute local Wi-Fi test at a
+6-FPS cap and JPEG quality 75 averaged 4.74 delivered FPS with zero reconnects
+while the full console was also viewing. Xbox reboot recovery and a short
+Amped 2 720p60 capture check succeeded. This is not 60-FPS browser video or a
+guarantee of zero gaps; longer-term and remote-link testing remain open. See
 [measured results](XBOX-CAPTURE-DEBUG.md). Xbox controller emulation is only a
 [proposal](XBOX-REMOTE-CONTROLLER.md), not an implemented feature.
 
@@ -35,6 +37,13 @@ The helper reads `.env` automatically and builds in ignored `build.xbox-local`.
 Use `python3 tools/build_xbox.py --configure-only` to generate the configuration
 without compiling. No third-party dotenv package is required.
 
+On an existing build, defaults do not override saved `sdkconfig` choices. To
+reproduce the network tuning, use `idf.py -B build.xbox-local menuconfig` and
+verify `CONFIG_LWIP_TCP_WND_DEFAULT=8192`,
+`CONFIG_LWIP_TCP_SND_BUF_DEFAULT=8192`, and
+`CONFIG_LWIP_TCP_RECVMBOX_SIZE=8` in `build.xbox-local/sdkconfig`, then rebuild.
+A fresh build picks these up from `boards/funcev_xbox.defaults`.
+
 Changing `.env` replaces the two build defaults even on an existing local build;
 removing it resets those defaults to empty. Saved device Wi-Fi settings in NVS
 still take precedence: this does not replace credentials already saved on the
@@ -49,8 +58,9 @@ on the device. The script builds only; it does not flash or reset the hardware.
 
 The public profile is credential-free. Configure Wi-Fi and Tailscale locally.
 Private board defaults, sdkconfig, build artifacts, passwords and authentication
-keys are not published. Saved device settings such as JPEG quality and the
-10-FPS limit are not embedded in this profile; set them on the device.
+keys are not published. The tested runtime settings are MJPEG, JPEG quality 75,
+and a 6-FPS limit (`vid_codec=0`, `jpg_quality=75`, `vid_fps_max=6`). Set them
+on the device: these runtime values are not embedded in this board profile.
 
 **Security:** this experimental profile disables HTTPS and application login.
 Tailscale protects tailnet access, but it does not protect the unencrypted,

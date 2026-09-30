@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Bound Xbox-profile TCP receive/send buffers to 8 KiB and receive mailboxes
+  to eight entries. A ten-minute local test completed with zero reconnects;
+  document exact settings, frame gaps, reboot recovery, and the Amped 2 check.
 - Replace the upstream overview with a concise Xbox-fork README, tested video
   rates, and the hardware and historical purchase totals used for this build.
 

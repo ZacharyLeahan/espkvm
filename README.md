@@ -4,11 +4,11 @@ This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/e
 
 ## Video
 
-- Tested **1280×720 at 60 Hz (dashboard)** and **720×480 at 60 Hz (game)**, including an automatic dashboard-to-game resolution change without resetting the ESP.
-- Approximately **60 FPS capture**, with **7–10 FPS MJPEG delivery** in short local Wi-Fi tests using a 10-FPS stream cap. Capture rate is not browser frame rate.
+- Tested **1280×720 at 60 Hz (dashboard and Amped 2)** and **720×480 at 60 Hz (Guilty Gear Isuka)**, plus capture recovery after an Xbox reboot without resetting the ESP.
+- Approximately **60 FPS capture**. A ten-minute local Wi-Fi test averaged **4.74 FPS MJPEG delivery with zero reconnects**, using a 6-FPS cap, JPEG quality 75, and two viewers. This does not mean zero frame gaps or 60-FPS browser video.
 - Tuned for our hardware's capture bandwidth and Wi-Fi buffering: **RGB888, two CSI lanes at 972 Mb/s per lane**, and paced network writes.
 
-Video works, including over Wi-Fi, but this remains experimental: Wi-Fi buffer exhaustion and mode-switch reliability need more testing. This is not a promise of every resolution/FPS or a proven maximum-performance preset. [Measurements and limitations](docs/XBOX-CAPTURE-DEBUG.md).
+Smaller per-connection TCP buffers improved Wi-Fi stability in our test. Longer runs, repeated mode changes, and remote Tailscale performance still need testing. This is not a promise of every resolution/FPS or a proven maximum-performance preset. [Measurements and limitations](docs/XBOX-CAPTURE-DEBUG.md).
 
 **Xbox gamepad emulation is not implemented.** See the [controller proposal](docs/XBOX-REMOTE-CONTROLLER.md).
 

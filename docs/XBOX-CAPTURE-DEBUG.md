@@ -99,3 +99,65 @@ The local 20-second stream test received HTTP 200 and 7273207 bytes containing
 near the end of the test; capture still completed about 60 FPS afterward.
 This confirms capture recovery, NOT stable maximum network throughput. Keep
 the current 10-FPS limit until the remaining transport stalls are addressed.
+
+## Sustained Wi-Fi investigation (2026-09-30)
+
+With a 720x480p60 game running on `c2ccf0051`, the local MJPEG test at
+10 FPS / JPEG quality 85 delivered 647 complete JPEG markers over about
+69 seconds before delivery stopped. Opening the full browser console overlapped
+with the failure. Stream reconnects and status requests subsequently timed out.
+
+Reducing settings to 6 FPS / quality 75 did not prevent another outage when
+the console joined the stream. USB diagnostics showed SDIO RX/TX mempool
+exhaustion while capture continued at about 300 frames per five seconds.
+This is a transport failure, not a stopped HDMI capture pipeline.
+
+The candidate bounds each TCP receive window and send buffer to 8 KiB instead of
+64 KiB, with an eight-entry receive mailbox, in the Xbox profile only. The
+hosted Wi-Fi driver retains receive-pool buffers until lwIP releases them;
+large per-connection windows can compete for that shared pool. Pool starvation
+is the working explanation; the test below demonstrates improvement, not proof
+that every cause of network stalls has been eliminated.
+
+### Candidate results
+
+Build `70b054e9f` was built with ESP-IDF 6.1 and USB-flashed to the same
+ESP32-P4 Function EV (P4 rev 3.2, C6 Wi-Fi) + Geekworm C790/TC358743.
+RGB888 and two CSI lanes at 972 Mb/s per lane were unchanged. Device settings
+were MJPEG, `vid_fps_max=6`, and `jpg_quality=75`; Ethernet was disconnected.
+Tailscale remained enabled, but test traffic used the local Wi-Fi address.
+
+- A 600-second `/stream` run received 2,843 JPEG start/end pairs and
+  202,601,432 bytes: **4.74 FPS average, zero reconnects**. The full browser
+  console was also connected for almost all of the run, including moving
+  gameplay in Guilty Gear Isuka. The measured FPS belongs to the test stream,
+  not a browser paint counter.
+- Capture stayed near 300 completed frames per five seconds. USB diagnostics
+  showed no new SDIO pool-exhaustion warnings during this run; status requests
+  remained responsive and the ESP did not reboot.
+- Maximum measured frame gap was **5.07 seconds**, so this is not a zero-gap
+  or zero-dropped-frame claim. Unchanged-frame suppression was enabled for the
+  first roughly seven minutes and disabled for the remainder. Its five-second
+  keepalive can explain static-screen gaps, but the measurement alone cannot
+  attribute every gap. Suppression was restored after the test.
+- Restarting the Xbox interrupted 480p capture, then capture resumed at
+  **1280x720p60**, without an ESP reset. A browser video client was streaming
+  again afterward. Browser reload-free recovery across the entire reboot was
+  not independently verified because the original test tab had closed.
+- With the user reporting Amped 2 running, HDMI measured **1280x720p60**,
+  capture remained about 60 FPS, and status reported about **5.83 published
+  FPS** with one WebSocket viewer. This was a short observation, not another
+  ten-minute soak or a measured browser-delivery rate.
+
+The planned separate single-viewer soak was replaced by the Xbox reboot and
+Amped 2 checks. Longer runs, repeated mode changes, other games and remote
+Tailscale delivery remain to be tested. Smaller TCP windows may reduce
+throughput over higher-latency links. The build completed with existing
+dependency warnings; boot still reports the absent SD card and a C6 firmware
+version mismatch. This experiment did not update the C6 firmware.
+
+`python3 tools/soak_mjpeg.py http://esp.local/stream --seconds 600` measures
+received JPEG start/end markers, delivery gaps and reconnect attempts without
+saving video. It does not decode images or prove that the browser paints every
+frame. Test the full console as well as the standalone stream, and treat any
+reconnect as a failed uninterrupted run.
