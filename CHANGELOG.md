@@ -7,6 +7,10 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Changed
+- Replace the upstream overview with a concise Xbox-fork README, tested video
+  rates, and the hardware and historical purchase totals used for this build.
+
 ### Added
 - Optional ignored `.env` Wi-Fi defaults, a credential-free `.env.example`, and
   a local Xbox build helper. Credentials are never intended for shared firmware.
