@@ -12,6 +12,8 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Local MJPEG soak-test utility reporting frame delivery gaps and reconnects,
+  with marker-boundary tests and no saved video frames.
 - Optional ignored `.env` Wi-Fi defaults, a credential-free `.env.example`, and
   a local Xbox build helper. Credentials are never intended for shared firmware.
 - Advanced capture diagnostics report completed-frame counts separately from
