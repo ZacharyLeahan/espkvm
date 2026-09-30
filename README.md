@@ -4,7 +4,7 @@ This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/e
 
 ## Video
 
-- Tested **1280×720 at 60 Hz (dashboard and Amped 2)** and **720×480 at 60 Hz (Guilty Gear Isuka)**, plus capture recovery after an Xbox reboot without resetting the ESP.
+- Tested **1280×720 at 60 Hz (dashboard and 720p game)** and **720×480 at 60 Hz (480p game)**, plus capture recovery after an Xbox reboot without resetting the ESP.
 - Approximately **60 FPS capture**. A ten-minute local Wi-Fi test averaged **4.74 FPS MJPEG delivery with zero reconnects**, using a 6-FPS cap, JPEG quality 75, and two viewers. This does not mean zero frame gaps or 60-FPS browser video.
 - Tuned for our hardware's capture bandwidth and Wi-Fi buffering: **RGB888, two CSI lanes at 972 Mb/s per lane**, and paced network writes.
 
@@ -18,9 +18,9 @@ Observed on our hardware with build `70b054e9f`, local Wi-Fi, a 6-FPS stream cap
 
 | Game / scenario | Detected HDMI input | Test duration | Streaming / recovery result |
 | --- | --- | --- | --- |
-| Guilty Gear Isuka | 720×480p60 | 10 minutes | Zero stream reconnects or ESP resets; 4.74 delivered FPS average with two viewers. |
+| 480p game | 720×480p60 | 10 minutes | Zero stream reconnects or ESP resets; 4.74 delivered FPS average with two viewers. |
 | Xbox reboot → dashboard | 1280×720p60 after boot | One reboot; recovery time not measured | Capture resumed without an ESP reset; browser recovery without reloading not independently verified. |
-| Amped 2 | 1280×720p60 | Short check; duration not recorded | Capture about 60 FPS; device reported 5.83 published FPS. Long-run and transition recovery not yet verified. |
+| 720p game | 1280×720p60 | Short check; duration not recorded | Capture about 60 FPS; device reported 5.83 published FPS. Long-run and transition recovery not yet verified. |
 
 These are observations, not blanket compatibility guarantees. Zero reconnects does not mean zero frame gaps. [Detailed test notes](docs/XBOX-CAPTURE-DEBUG.md#sustained-wi-fi-investigation-2026-09-30).
 

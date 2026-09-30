@@ -61,7 +61,7 @@ which individual format/packing/timing difference is responsible.
 - At game input 720x480, repeated samples show 299-300 completed frames per
   5000 ms with no viewers. No capture timeout in these samples.
 - A JPEG request succeeded in about 1.1 seconds. The image visibly shows the
-  Guilty Gear Isuka title screen with readable text.
+  480p game's title screen with readable text.
 - Restored `vid_codec=0` (MJPEG). A bounded local `/stream` test returned HTTP
   200 and 6,346,206 bytes in 20 seconds; timeout was the intentional test limit.
   During it, status reported 8.99 published FPS, 0.99 skipped FPS, 2174 kbps,
@@ -130,7 +130,7 @@ Tailscale remained enabled, but test traffic used the local Wi-Fi address.
 - A 600-second `/stream` run received 2,843 JPEG start/end pairs and
   202,601,432 bytes: **4.74 FPS average, zero reconnects**. The full browser
   console was also connected for almost all of the run, including moving
-  gameplay in Guilty Gear Isuka. The measured FPS belongs to the test stream,
+  gameplay in the 480p game. The measured FPS belongs to the test stream,
   not a browser paint counter.
 - Capture stayed near 300 completed frames per five seconds. USB diagnostics
   showed no new SDIO pool-exhaustion warnings during this run; status requests
@@ -144,13 +144,13 @@ Tailscale remained enabled, but test traffic used the local Wi-Fi address.
   **1280x720p60**, without an ESP reset. A browser video client was streaming
   again afterward. Browser reload-free recovery across the entire reboot was
   not independently verified because the original test tab had closed.
-- With the user reporting Amped 2 running, HDMI measured **1280x720p60**,
+- With the user reporting the 720p game running, HDMI measured **1280x720p60**,
   capture remained about 60 FPS, and status reported about **5.83 published
   FPS** with one WebSocket viewer. This was a short observation, not another
   ten-minute soak or a measured browser-delivery rate.
 
 The planned separate single-viewer soak was replaced by the Xbox reboot and
-Amped 2 checks. Longer runs, repeated mode changes, other games and remote
+720p game checks. Longer runs, repeated mode changes, other games and remote
 Tailscale delivery remain to be tested. Smaller TCP windows may reduce
 throughput over higher-latency links. The build completed with existing
 dependency warnings; boot still reports the absent SD card and a C6 firmware

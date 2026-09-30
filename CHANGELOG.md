@@ -10,13 +10,13 @@ bumps the patch).
 ### Changed
 - Bound Xbox-profile TCP receive/send buffers to 8 KiB and receive mailboxes
   to eight entries. A ten-minute local test completed with zero reconnects;
-  document exact settings, frame gaps, reboot recovery, and the Amped 2 check.
+  document exact settings, frame gaps, reboot recovery, and the 720p game check.
 - Replace the upstream overview with a concise Xbox-fork README, tested video
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
 - Concise Xbox compatibility/recovery table distinguishing sustained game
-  streaming, reboot capture recovery, and the short Amped 2 observation.
+  streaming, reboot capture recovery, and the short 720p game observation.
 - Local MJPEG soak-test utility reporting frame delivery gaps and reconnects,
   with marker-boundary tests and no saved video frames.
 - Optional ignored `.env` Wi-Fi defaults, a credential-free `.env.example`, and

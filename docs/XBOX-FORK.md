@@ -12,7 +12,7 @@ automatic switch into 480p60 game capture have worked at about 60 captured
 frames/sec. With reduced TCP buffers, a ten-minute local Wi-Fi test at a
 6-FPS cap and JPEG quality 75 averaged 4.74 delivered FPS with zero reconnects
 while the full console was also viewing. Xbox reboot recovery and a short
-Amped 2 720p60 capture check succeeded. This is not 60-FPS browser video or a
+720p60 game capture check succeeded. This is not 60-FPS browser video or a
 guarantee of zero gaps; longer-term and remote-link testing remain open. See
 [measured results](XBOX-CAPTURE-DEBUG.md). Xbox controller emulation is only a
 [proposal](XBOX-REMOTE-CONTROLLER.md), not an implemented feature.
