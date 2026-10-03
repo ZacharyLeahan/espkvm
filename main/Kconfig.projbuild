@@ -99,6 +99,15 @@ menu "ESP-KVM"
                 register and read it back before starting the checkerboard.
                 This register change is volatile; keep it off in normal builds.
 
+        config KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+            bool "Test ICN6211 PLL synchronized to the DSI clock"
+            depends on KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+            default n
+            help
+                Unlock DSI configuration and derive the 24 MHz pixel clock
+                from a continuous 576 Mb/s DSI lane. Verify each register.
+                Isolated LCD experiment; not yet validated for normal use.
+
         config KVM_GC9A01_SPI_HOST
             int "Round SPI LCD (GC9A01) SPI host (2 = SPI2)"
             depends on KVM_ENABLE_DISPLAY

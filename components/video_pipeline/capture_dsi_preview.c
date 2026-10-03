@@ -27,6 +27,7 @@
 #include "esp_timer.h"
 #include "driver/i2c_master.h"
 #include "hal/mipi_dsi_host_ll.h"
+#include "hal/mipi_dsi_brg_ll.h"
 #include "soc/mipi_dsi_host_struct.h"
 #include "soc/mipi_dsi_bridge_struct.h"
 #include "freertos/FreeRTOS.h"
@@ -206,6 +207,13 @@ static esp_err_t icn6211_read_register(uint8_t reg, uint8_t *value)
     mipi_dsi_host_ll_enable_bta(host, true);
     mipi_dsi_host_ll_gen_set_rx_vcid(host, 0);
     mipi_dsi_host_ll_gen_set_packet_header(host, 0, MIPI_DSI_DT_GENERIC_READ_REQUEST_2, 1, reg);
+    while (mipi_dsi_host_ll_gen_is_read_cmd_busy(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            mipi_dsi_host_ll_enable_bta(host, false);
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
     while (mipi_dsi_host_ll_gen_is_read_fifo_empty(host)) {
         if (esp_timer_get_time() >= deadline) {
             mipi_dsi_host_ll_enable_bta(host, false);
@@ -283,6 +291,9 @@ static esp_err_t icn6211_disable_bist(void)
     ESP_RETURN_ON_ERROR(icn6211_read_register(0x2a, &before), TAG, "read BIST failed");
     const uint8_t after = before & ~0x08u; /* BIST_POL_BIST_GEN */
     ESP_LOGI(TAG, "ICN6211 BIST 0x2a: 0x%02x -> 0x%02x", before, after);
+    if (before == after) {
+        return ESP_OK;
+    }
     ESP_RETURN_ON_ERROR(icn6211_write_register(0x2a, after), TAG, "write BIST failed");
     uint8_t verify;
     ESP_RETURN_ON_ERROR(icn6211_read_register(0x2a, &verify), TAG, "verify BIST failed");
@@ -293,6 +304,74 @@ static esp_err_t icn6211_disable_bist(void)
     ESP_LOGI(TAG, "ICN6211 BIST enable bit confirmed clear; starting checkerboard");
     return ESP_OK;
 }
+
+static void icn6211_inspect_video(void)
+{
+    /* Generic read responses require command mode on this host. Stop DPI
+     * first so its DMA source does not continue feeding a stopped video sink. */
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    log_dsi_link("before paused bridge read");
+    mipi_dsi_brg_ll_enable_dpi_output(&MIPI_DSI_BRIDGE, false);
+    mipi_dsi_brg_ll_update_dpi_config(&MIPI_DSI_BRIDGE);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    mipi_dsi_host_ll_enable_video_mode(&MIPI_DSI_HOST, false);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    static const uint8_t regs[] = {0x00, 0x01, 0x02, 0x2a, 0x80, 0x81,
+                                   0x84, 0x85, 0x86, 0x87, 0x56, 0x69, 0x6b, 0x7a};
+    uint8_t bist = 0;
+    for (size_t i = 0; i < sizeof(regs); ++i) {
+        uint8_t value;
+        esp_err_t err = icn6211_read_register(regs[i], &value);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "paused ICN6211 0x%02x: %s", regs[i], esp_err_to_name(err));
+            break;
+        }
+        ESP_LOGI(TAG, "paused ICN6211 0x%02x = 0x%02x", regs[i], value);
+        if (regs[i] == 0x2a) {
+            bist = value;
+        }
+    }
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+    if (bist & 0x08) {
+        esp_err_t err = icn6211_write_register(0x7a, 0xc1);
+        if (err == ESP_OK) {
+            err = icn6211_write_register(0x2a, bist & ~0x08u);
+        }
+        ESP_LOGI(TAG, "post-video BIST clear: %s", esp_err_to_name(err));
+    }
+#else
+    (void)bist;
+#endif
+    mipi_dsi_host_ll_enable_video_mode(&MIPI_DSI_HOST, true);
+    mipi_dsi_brg_ll_enable_dpi_output(&MIPI_DSI_BRIDGE, true);
+    mipi_dsi_brg_ll_update_dpi_config(&MIPI_DSI_BRIDGE);
+}
+
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+static esp_err_t icn6211_configure_mipi_pll(void)
+{
+    /* ICN6211's configuration tool and Linux driver use 0xc1 to permit DSI
+     * writes. At 576 Mb/s the PLL reference is 144 MHz. P=6, M=16, S=16
+     * gives the panel's existing 24 MHz pixel clock. Geometry stays intact. */
+    static const uint8_t setup[][2] = {
+        {0x7a, 0xc1}, {0x6b, 0x73}, {0x69, 0x10},
+        {0x56, 0x92}, {0x09, 0x10},
+    };
+    for (size_t i = 0; i < sizeof(setup) / sizeof(setup[0]); ++i) {
+        ESP_RETURN_ON_ERROR(icn6211_write_register(setup[i][0], setup[i][1]),
+                            TAG, "MIPI PLL setup write failed");
+        vTaskDelay(pdMS_TO_TICKS(10));
+        uint8_t actual;
+        ESP_RETURN_ON_ERROR(icn6211_read_register(setup[i][0], &actual),
+                            TAG, "MIPI PLL setup readback failed");
+        ESP_LOGI(TAG, "ICN6211 PLL register 0x%02x expected=0x%02x actual=0x%02x",
+                 setup[i][0], setup[i][1], actual);
+        ESP_RETURN_ON_FALSE(actual == setup[i][1], ESP_ERR_INVALID_RESPONSE,
+                            TAG, "MIPI PLL setup rejected");
+    }
+    return ESP_OK;
+}
+#endif
 
 #endif
 
@@ -312,7 +391,10 @@ void capture_dsi_preview_init(void)
     const esp_lcd_dsi_bus_config_t bus_cfg = {
         .bus_id = 0,
         .num_data_lanes = 1,
-        .lane_bit_rate_mbps = 600,
+        .lane_bit_rate_mbps = 576, /* non-burst RGB888: 24 MHz * 24 bits */
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+        .flags.clock_lane_force_hs = true,
+#endif
     };
     err = esp_lcd_new_dsi_bus(&bus_cfg, &s_bus);
     if (err != ESP_OK) {
@@ -342,13 +424,16 @@ void capture_dsi_preview_init(void)
     return;
 #endif
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
-    /* Waveshare's onboard controller was observed changing BIST_POL from
-     * 0x01 to 0x49 later in startup. Do not race its initialization. */
-    vTaskDelay(pdMS_TO_TICKS(500));
     err = icn6211_disable_bist();
     if (err != ESP_OK) {
         goto fail;
     }
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+    err = icn6211_configure_mipi_pll();
+    if (err != ESP_OK) {
+        goto fail;
+    }
+#endif
 #endif
     const uint8_t dcs_zero = 0;
     err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_MADCTL, &dcs_zero, 1);
@@ -420,6 +505,9 @@ void capture_dsi_preview_init(void)
     vTaskDelay(pdMS_TO_TICKS(100));
     log_dsi_link("startup");
     ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, 5 updates/s");
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+    icn6211_inspect_video();
+#endif
     return;
 
 fail:

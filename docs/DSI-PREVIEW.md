@@ -1,9 +1,17 @@
-# Waveshare 3.5-inch DSI LCD (E) preview: not working yet
+# Waveshare 3.5-inch DSI LCD (E): framebuffer verified
 
-This is an **opt-in experiment**, not a supported display feature. The Xbox
-picture works in the browser, but this LCD currently shows its color-bar
-pattern instead of the preview framebuffer. Keep `CONFIG_KVM_DSI_PREVIEW`
+This is an **opt-in experiment**, not a supported display feature. The user
+confirmed the standalone yellow/black checkerboard on the physical LCD.
+Live Xbox preview remains to be verified. Keep `CONFIG_KVM_DSI_PREVIEW`
 disabled in normal builds. No touchscreen controls are implemented.
+
+The verified checkpoint uses `boards/funcev_dsi_pll.defaults`: one lane at
+576 Mb/s, continuous clock, 24 MHz RGB888, non-burst sync events, and no HS
+EoTP. It also includes ICN6211 PLL writes and a bounded command-mode readback
+pause after ten seconds. Preserve this complete sequence when reproducing
+the test; the necessary subset has not yet been isolated. The bridge's PLL
+registers reverted by the later readback, so successful output does not prove
+those writes alone fixed it. This standalone profile disables CSI capture.
 
 ## Hardware and known-good capture path
 
@@ -19,8 +27,8 @@ disabled in normal builds. No touchscreen controls are implemented.
 ## What was tried
 
 The test firmware writes a yellow/black checkerboard on startup and then
-letterboxes captured frames into a 640×480 RGB888 framebuffer. Neither the
-checkerboard nor Xbox pixels have appeared on the LCD.
+letterboxes captured frames into a 640×480 RGB888 framebuffer. The trials
+below preceded the successful standalone checkerboard checkpoint above.
 
 | DSI trial | LCD observation |
 | --- | --- |
