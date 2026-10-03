@@ -45,6 +45,19 @@ static uint32_t s_last_w;
 static uint32_t s_last_h;
 static uint32_t s_frames;
 static int64_t s_report_us;
+static bool s_link_logged;
+
+static void log_dsi_link(const char *phase)
+{
+    ESP_LOGI(TAG, "DSI %s: phy=0x%08lx mode=0x%08lx cfg=0x%08lx active=0x%08lx err0=0x%08lx err1=0x%08lx",
+             phase,
+             (unsigned long)MIPI_DSI_HOST.phy_status.val,
+             (unsigned long)MIPI_DSI_HOST.mode_cfg.val,
+             (unsigned long)MIPI_DSI_HOST.vid_mode_cfg.val,
+             (unsigned long)MIPI_DSI_HOST.vid_mode_cfg_act.val,
+             (unsigned long)MIPI_DSI_HOST.int_st0.val,
+             (unsigned long)MIPI_DSI_HOST.int_st1.val);
+}
 
 static void preview_cleanup(void)
 {
@@ -184,13 +197,15 @@ void capture_dsi_preview_init(void)
      * IDF currently hardcodes burst video and per-frame BTA acknowledgements
      * for all DPI panels; this generic bridge has no DSI command response.
      * Set these before panel_init starts video output. */
-    MIPI_DSI_HOST.vid_mode_cfg.vid_mode_type = 0; /* non-burst, sync pulses */
+    MIPI_DSI_HOST.vid_mode_cfg.vid_mode_type = 1; /* non-burst, sync events */
     MIPI_DSI_HOST.vid_mode_cfg.frame_bta_ack_en = 0;
     err = esp_lcd_panel_init(s_panel);
     if (err != ESP_OK) {
         goto fail;
     }
     waveshare_control_write(0xad, 0x01);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    log_dsi_link("startup");
     ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, 5 updates/s");
     return;
 
@@ -278,6 +293,10 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
         ESP_LOGW(TAG, "frame submit failed: %s", esp_err_to_name(err));
     }
     s_frames++;
+    if (!s_link_logged && s_frames >= 5) {
+        s_link_logged = true;
+        log_dsi_link("stream");
+    }
     const int64_t now = esp_timer_get_time();
     if (now - s_report_us >= 10000000) {
         ESP_LOGI(TAG, "preview: %lu updates in %lu ms", (unsigned long)s_frames,
