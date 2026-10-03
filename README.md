@@ -30,9 +30,11 @@ These are observations, not blanket compatibility guarantees. Zero reconnects do
 | --- | --- | ---: |
 | Espressif ESP32-P4 Function EV board (ordered as P4X-Function-EV; P4 rev 3.2, C6 Wi-Fi) | AliExpress | $95.54 |
 | Geekworm C790 HDMI-to-CSI-2 bridge (Toshiba TC358743) | AliExpress | $85.32 |
-| **Combined** | | **$180.86** |
+| **Working browser-capture hardware total** | | **$180.86** |
+| Waveshare 3.5-inch DSI LCD (E), 640×480 touch (optional; local video preview **not yet working**) | Amazon | $39.17 |
+| **All three purchases** | | **$220.03** |
 
-Prices are from our September 18, 2026 order-confirmation emails, not current quotes or bare component prices. This list does not include the Xbox's HDMI adapter, cables, or a case.
+Prices are historical order totals from the September 18 (AliExpress) and September 30 (Amazon) 2026 confirmation emails, not current quotes or bare component prices. The LCD currently shows color bars, not the Xbox picture; it is **not** required for browser capture. This list does not include the Xbox's HDMI adapter, cables, or a case.
 
 ## Build and use
 
