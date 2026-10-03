@@ -18,6 +18,9 @@ bumps the patch).
 - Opt-in Function EV DSI preview experiment for a Waveshare 3.5-inch LCD.
   The ESP receives Xbox frames and sees the LCD touch controller, but the
   panel has not displayed the preview; keep it disabled by default.
+- Record the DSI trial matrix and the Waveshare overlay's one-lane timing;
+  non-burst video and disabling HS EoTP changed the bars but did not display
+  the framebuffer.
 - Concise Xbox compatibility/recovery table distinguishing sustained game
   streaming, reboot capture recovery, and the short 720p game observation.
 - Local MJPEG soak-test utility reporting frame delivery gaps and reconnects,

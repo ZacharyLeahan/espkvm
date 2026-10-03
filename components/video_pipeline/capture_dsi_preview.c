@@ -159,12 +159,16 @@ void capture_dsi_preview_init(void)
     const esp_lcd_dsi_bus_config_t bus_cfg = {
         .bus_id = 0,
         .num_data_lanes = 1,
-        .lane_bit_rate_mbps = 800,
+        /* 24 MHz RGB888 over one lane is nominally 576 Mb/s. */
+        .lane_bit_rate_mbps = 600,
     };
     err = esp_lcd_new_dsi_bus(&bus_cfg, &s_bus);
     if (err != ESP_OK) {
         goto fail;
     }
+    /* Raspberry Pi's VC4 DSI host disables HS end-of-transmission packets for
+     * this generic panel; IDF enables them by default. */
+    MIPI_DSI_HOST.pckhdl_cfg.eotp_tx_en = 0;
 
     const esp_lcd_dpi_panel_config_t dpi_cfg = {
         .virtual_channel = 0,

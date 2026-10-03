@@ -34,7 +34,7 @@ These are observations, not blanket compatibility guarantees. Zero reconnects do
 | Waveshare 3.5-inch DSI LCD (E), 640×480 touch (optional; local video preview **not yet working**) | Amazon | $39.17 |
 | **All three purchases** | | **$220.03** |
 
-Prices are historical order totals from the September 18 (AliExpress) and September 30 (Amazon) 2026 confirmation emails, not current quotes or bare component prices. The LCD currently shows color bars, not the Xbox picture; it is **not** required for browser capture. This list does not include the Xbox's HDMI adapter, cables, or a case.
+Prices are historical order totals from the September 18 (AliExpress) and September 30 (Amazon) 2026 confirmation emails, not current quotes or bare component prices. The LCD currently shows color bars, not the Xbox picture; it is **not** required for browser capture. [LCD diagnostic notes](docs/DSI-PREVIEW.md). This list does not include the Xbox's HDMI adapter, cables, or a case.
 
 ## Build and use
 
