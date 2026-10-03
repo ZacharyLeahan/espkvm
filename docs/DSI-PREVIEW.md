@@ -81,10 +81,8 @@ matches Waveshare's published DSI connector pinout. This still does not
 establish that high-speed DSI pairs are making reliable contact. Do not flip
 or reseat either ribbon while powered.
 
-The next step is to identify the display board's DSI bridge
-initialization/reset sequence and test this exact LCD with a known-good
-Raspberry Pi before more timing guesses. The board in our photos carries an
-ICN6211 DSI-to-RGB bridge and a Nuvoton controller; another developer has
+The board in our photos carries an ICN6211 DSI-to-RGB bridge and a Nuvoton
+controller; another developer has
 [reported this model not working on ESP32-P4](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184).
 
 ## Source-level compatibility findings
@@ -96,9 +94,19 @@ describes the same failure on a different ESP32-P4 board and requests driver
 support. This does not prove that the panel cannot work on a P4, but it means
 we do not have a vendor-validated configuration to port.
 
-The manufacturer's Raspberry Pi overlay describes a **generic DSI panel**,
-not an ICN6211 bridge device. On a Pi, that path supplies timing and mode
-flags without the explicit ICN6211 register sequence found in
+The manufacturer's Raspberry Pi instructions select
+`dtoverlay=waveshare_35DSI,35E,dsi1`. We decoded that overlay: its 35E panel
+defaults are one data lane, RGB888, only `MODE_VIDEO` (not burst or sync
+pulse), 24 MHz, 640×480, and 48/32/80 and 3/4/13 porches. The current ESP
+trial already matches these values. Raspberry Pi's
+[generic `panel-dsi` driver](https://github.com/raspberrypi/linux/blob/rpi-6.12.y/drivers/gpu/drm/panel/panel-simple.c)
+reads those properties and attaches the DSI host; it does not send a
+panel-specific initialization command sequence. Thus we have not found a
+missing Waveshare overlay parameter to copy.
+
+The overlay describes a **generic DSI panel**, not an ICN6211 bridge device.
+On a Pi, that path supplies timing and mode flags without the explicit ICN6211
+register sequence found in
 [Linux's standalone ICN6211 bridge driver](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/bridge/chipone-icn6211.c).
 The LCD's onboard Nuvoton controller may initialize the bridge instead, but
 its firmware and exact startup contract are not documented by this overlay.
@@ -108,7 +116,8 @@ with the Waveshare board's own controller. Also, a
 shows that rainbow bars can persist when the generic panel driver fails,
 despite the hardware being otherwise functional.
 
-Before another flash, obtain either a confirmed ESP32-P4 example for this
-exact **3.5-inch DSI LCD (E)** or the panel's initialization requirements from
-Waveshare. A known-good Raspberry Pi test would separately establish that the
-LCD, bridge, and ribbons work with the manufacturer's supported setup.
+Before another flash, a known-good Raspberry Pi test would establish whether
+this LCD, bridge, and ribbon work with the manufacturer's supported setup.
+If that succeeds, compare the Pi's actual DSI signal/clock behavior with the
+ESP32-P4 host rather than guessing more nominal timing values. A validated
+ESP32-P4 example for this exact model would provide the same missing evidence.
