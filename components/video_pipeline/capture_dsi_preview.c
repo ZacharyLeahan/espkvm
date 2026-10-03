@@ -27,6 +27,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/i2c_master.h"
+#include "driver/ppa.h"
 #include "hal/mipi_dsi_host_ll.h"
 #include "hal/mipi_dsi_brg_ll.h"
 #include "esp_task_wdt.h"
@@ -41,7 +42,7 @@
 #define LCD_W 640u
 #define LCD_H 480u
 #define LCD_FB_BYTES (LCD_W * LCD_H * 3u)
-#define PREVIEW_LOCAL_FPS 30
+#define PREVIEW_LOCAL_FPS 60
 #define PREVIEW_REMOTE_FPS 1
 #define ICN_READ_TIMEOUT_US 100000
 
@@ -51,10 +52,17 @@ static esp_lcd_dsi_bus_handle_t s_bus;
 static esp_lcd_panel_io_handle_t s_dbi_io;
 static esp_lcd_panel_handle_t s_panel;
 static uint8_t *s_fb;
+static uint8_t *s_buffers[2];
+static unsigned s_draw_index;
+static bool s_clear_buffer[2] = {true, true};
+static uint32_t s_reuse_after;
 static int64_t s_last_frame_us;
 static int64_t s_last_cost_us;
+static bool s_last_accelerated;
 static int s_last_priority = -1;
 static uint32_t s_source_x[LCD_W];
+static ppa_client_handle_t s_scaler;
+static bool s_scaler_failed;
 static uint32_t s_last_w;
 static uint32_t s_last_h;
 static uint32_t s_frames;
@@ -94,6 +102,10 @@ static void log_dsi_link(const char *phase)
 
 static void preview_cleanup(void)
 {
+    if (s_scaler) {
+        ppa_unregister_client(s_scaler);
+        s_scaler = NULL;
+    }
     if (s_panel) {
         esp_lcd_panel_del(s_panel);
         s_panel = NULL;
@@ -474,7 +486,7 @@ void capture_dsi_preview_init(void)
         .dpi_clock_freq_mhz = 24,
         .in_color_format = LCD_COLOR_FMT_RGB888,
         .out_color_format = LCD_COLOR_FMT_RGB888,
-        .num_fbs = 1,
+        .num_fbs = 2,
         .video_timing = {
             .h_size = LCD_W,
             .v_size = LCD_H,
@@ -490,7 +502,9 @@ void capture_dsi_preview_init(void)
     if (err != ESP_OK) {
         goto fail;
     }
-    err = esp_lcd_dpi_panel_get_frame_buffer(s_panel, 1, (void **)&s_fb);
+    err = esp_lcd_dpi_panel_get_frame_buffer(s_panel, 2,
+                                            (void **)&s_buffers[0], (void **)&s_buffers[1]);
+    s_fb = s_buffers[0];
     if (err != ESP_OK || !s_fb) {
         goto fail;
     }
@@ -525,6 +539,9 @@ void capture_dsi_preview_init(void)
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
     icn6211_inspect_video();
 #endif
+    /* Framebuffer zero is on screen; prepare the first live frame in one. */
+    s_draw_index = 1;
+    s_fb = s_buffers[s_draw_index];
     return;
 
 fail:
@@ -537,18 +554,19 @@ bool capture_dsi_preview_due(void)
 {
     const bool remote = video_frame_viewer_count() > 0;
     const int fps = kvm_thermal_fps_limit(remote ? PREVIEW_REMOTE_FPS : PREVIEW_LOCAL_FPS);
-    if (!s_fb || fps <= 0) {
+    if (!s_fb || fps <= 0 || (int32_t)(s_dma_frames - s_reuse_after) < 0) {
         return false;
     }
     if (s_last_priority != (int)remote) {
         s_last_priority = remote;
         ESP_LOGI(TAG, "priority: %s", remote ? "remote (LCD <=1 fps, <=5% copy duty)"
-                                            : "LCD (<=30 fps, <=80% copy duty)");
+                                            : "LCD (<=60 fps, CPU<=80% / PPA<=90% duty)");
     }
     /* Bound CPU work as well as FPS. Always leave time for network/control
      * tasks, and back off automatically when the scaler takes longer. */
     int64_t interval = 1000000 / fps;
-    const int64_t budget = remote ? s_last_cost_us * 20 : s_last_cost_us * 5 / 4;
+    const int64_t budget = remote ? s_last_cost_us * 20 :
+        (s_last_accelerated ? s_last_cost_us * 10 / 9 : s_last_cost_us * 5 / 4);
     if (budget > interval) {
         interval = budget;
     }
@@ -586,6 +604,51 @@ static void source_pixel(const uint8_t *src, uint32_t src_w, uint32_t x, uint32_
     dst[2] = clamp8((yy + 516 * u + 128) >> 8);
 }
 
+static bool scale_hardware(const void *src, uint32_t width, uint32_t height,
+                           uint32_t out_w, uint32_t out_h, uint32_t x0, uint32_t y0,
+                           const capture_pixfmt_t *fmt)
+{
+#if !CONFIG_KVM_DSI_PREVIEW_PPA
+    return false;
+#endif
+    /* Use only exact sixteenth-step RGB scales. Other modes retain the known
+     * CPU fit rather than silently cropping or stretching to PPA granularity. */
+    if (s_scaler_failed || fmt->bpp != 24 || (out_w * 16u) % width ||
+        (out_h * 16u) % height || out_w * 16u < width || out_h * 16u < height) {
+        return false;
+    }
+    if (!s_scaler) {
+        const ppa_client_config_t cfg = {.oper_type = PPA_OPERATION_SRM};
+        esp_err_t err = ppa_register_client(&cfg, &s_scaler);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "PPA unavailable (%s); using CPU scaler", esp_err_to_name(err));
+            s_scaler_failed = true;
+            return false;
+        }
+    }
+    const ppa_srm_oper_config_t cfg = {
+        .in = {.buffer = src, .pic_w = width, .pic_h = height,
+               .block_w = width, .block_h = height, .srm_cm = PPA_SRM_COLOR_MODE_RGB888},
+        .out = {.buffer = s_fb, .buffer_size = LCD_FB_BYTES,
+                .pic_w = LCD_W, .pic_h = LCD_H, .block_offset_x = x0,
+                .block_offset_y = y0, .srm_cm = PPA_SRM_COLOR_MODE_RGB888},
+        .scale_x = (float)out_w / width, .scale_y = (float)out_h / height,
+        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+        .rgb_swap = strcmp(fmt->name, "bgr888") == 0,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    /* The PPA driver invalidates its destination before DMA. No CPU reads or
+     * writes follow a successful DMA update, so the later draw_bitmap flush
+     * cannot overwrite DMA pixels with stale dirty cache lines. */
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_scaler, &cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "PPA failed (%s); using CPU scaler", esp_err_to_name(err));
+        s_scaler_failed = true;
+        return false;
+    }
+    return true;
+}
+
 void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
                                const capture_pixfmt_t *fmt)
 {
@@ -609,7 +672,7 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     const uint32_t x0 = (LCD_W - out_w) / 2u;
     const uint32_t y0 = (LCD_H - out_h) / 2u;
     if (width != s_last_w || height != s_last_h) {
-        memset(s_fb, 0, LCD_FB_BYTES);
+        s_clear_buffer[0] = s_clear_buffer[1] = true;
         s_last_w = width;
         s_last_h = height;
         for (uint32_t dx = 0; dx < out_w; ++dx) {
@@ -618,8 +681,16 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
         ESP_LOGI(TAG, "preview input %lux%lu -> %lux%lu", (unsigned long)width,
                  (unsigned long)height, (unsigned long)out_w, (unsigned long)out_h);
     }
+    if (s_clear_buffer[s_draw_index]) {
+        memset(s_fb, 0, LCD_FB_BYTES);
+        if (esp_cache_msync(s_fb, LCD_FB_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M) != ESP_OK) {
+            return;
+        }
+        s_clear_buffer[s_draw_index] = false;
+    }
+    const bool accelerated = scale_hardware(src, width, height, out_w, out_h, x0, y0, fmt);
     const bool bgr = strcmp(fmt->name, "bgr888") == 0;
-    for (uint32_t dy = 0; dy < out_h; ++dy) {
+    for (uint32_t dy = 0; !accelerated && dy < out_h; ++dy) {
         const uint32_t sy = (uint32_t)((uint64_t)dy * height / out_h);
         uint8_t *line = s_fb + ((size_t)(dy + y0) * LCD_W + x0) * 3u;
         for (uint32_t dx = 0; dx < out_w; ++dx) {
@@ -629,7 +700,13 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "frame submit failed: %s", esp_err_to_name(err));
+        return;
     }
+    /* DMA completion selects the submitted buffer before our callback. Allow
+     * two completions to cover an ISR already in flight at submission. */
+    s_reuse_after = s_dma_frames + 2;
+    s_draw_index ^= 1u;
+    s_fb = s_buffers[s_draw_index];
     s_frames++;
     if (!s_link_logged && s_frames >= 5) {
         s_link_logged = true;
@@ -637,9 +714,11 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     }
     const int64_t now = esp_timer_get_time();
     s_last_cost_us = now - s_last_frame_us;
+    s_last_accelerated = accelerated;
     if (now - s_report_us >= 10000000) {
-        ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us", (unsigned long)s_frames,
-                 (unsigned long)((now - s_report_us) / 1000), (unsigned long)s_last_cost_us);
+        ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us (%s)", (unsigned long)s_frames,
+                 (unsigned long)((now - s_report_us) / 1000), (unsigned long)s_last_cost_us,
+                 accelerated ? "PPA" : "CPU");
         s_frames = 0;
         s_report_us = now;
     }

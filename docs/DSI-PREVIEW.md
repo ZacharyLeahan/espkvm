@@ -26,14 +26,31 @@ idf.py -B build.dsi-live -D SDKCONFIG=build.dsi-live/sdkconfig \
 The first live trial retains the ten-second diagnostic pause and limits LCD
 updates to 5 fps. These are bring-up settings, not performance claims.
 
-The subsequent viewer-aware policy targets up to 30 LCD updates/s with no
-encoded-frame consumers, bounded to 80% measured copy duty. When a remote
+The subsequent viewer-aware policy targets up to 60 LCD updates/s with no
+encoded-frame consumers, bounded to 80% measured CPU-copy duty or 90% measured
+hardware-scaler duty. When a remote
 viewer (or another consumer counted by the frame store) connects, encoding
 runs first and the LCD drops to at most 1 update/s and 5% copy duty. Thermal
 limits can reduce these further. Disconnecting restores the local budget
 automatically. These are ceilings, not guaranteed rates; Wi-Fi and control
 tasks retain time in LCD-only mode. HDMI capture and LCD scanout clocks stay
 unchanged. Scaler source columns are cached instead of dividing per pixel.
+
+With `CONFIG_KVM_DSI_PREVIEW_PPA=y`, exact RGB scale ratios representable in sixteenths can use the ESP PPA;
+other ratios and YUV retain CPU scaling. See Espressif's
+[PPA documentation](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32p4/api-reference/peripherals/ppa.html).
+The driver invalidates the DMA destination. CPU-written letterboxing is
+flushed on geometry changes. Two DSI buffers separate rendering from scanout;
+after submission the previous buffer is not reused until two DMA completions
+have passed, covering an ISR already in flight at submission.
+At 1280x720 -> 640x360, measurements were about 27.7 ms per update and
+29.4 updates/s with the 90% budget. At 80% the same hardware path delivered
+about 20 updates/s because it missed the next available input frame.
+The 60 fps ceiling is not a measured achievement. The user reported horizontal
+splits at 29.4 fps with one buffer, and still saw splits at about 20 fps with
+two buffers. The current CPU-only two-buffer control measures about 15 fps;
+its visual result is pending. PPA therefore remains disabled by default.
+These experiments have not established a faster tear-free configuration.
 
 At 720p the first policy test measured 199 LCD updates per roughly ten seconds
 (about 20 fps) with no viewer. A 45.7-second MJPEG connection switched priority

@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add opt-in PPA scaling for exact RGB LCD ratios and double-buffered display
+  handoff. A single-buffer 720p trial reached 29.4 updates/s but showed tearing;
+  PPA remains disabled pending visual validation. Remote priority is unchanged.
 - Give the LCD a larger adaptive copy budget without remote viewers; prioritize
   encoding and limit LCD updates to at most 1 fps when viewers connect. Cache
   scaler coordinates and respect thermal throttling in both modes.

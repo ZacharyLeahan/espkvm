@@ -57,9 +57,18 @@ menu "ESP-KVM"
                 Drive the 640x480 Waveshare 3.5inch DSI LCD (E) from the
                 Function EV Board's MIPI DISPLAY connector. This experimental
                 local preview is independent of the browser video stream and
-                targets up to 30 updates/s alone, at most 1 with remote viewers,
+                targets up to 60 updates/s alone, at most 1 with remote viewers,
                 with measured copy-duty and thermal limits. A standalone framebuffer
                 has been verified; live capture remains experimental.
+
+        config KVM_DSI_PREVIEW_PPA
+            bool "Experimental hardware scaler for exact RGB LCD ratios"
+            depends on KVM_DSI_PREVIEW
+            default n
+            help
+                Test PPA scaling for RGB ratios representable in sixteenths.
+                CPU scaling remains the fallback. Disabled until visual
+                flicker reported during hardware testing is resolved.
 
         config KVM_DSI_PREVIEW_HOST_PATTERN
             bool "DSI host vertical-bar diagnostic (replaces local preview)"
