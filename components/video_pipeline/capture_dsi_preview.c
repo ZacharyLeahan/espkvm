@@ -1,0 +1,300 @@
+/*
+ * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Experimental, local-only preview for the Waveshare 3.5inch DSI LCD (E).
+ * The panel's Raspberry Pi overlay describes a generic one-lane RGB888 DSI
+ * video sink at 640x480 with a 24 MHz pixel clock. Its timing is not the HDMI
+ * timing: every captured mode is fitted into this fixed 640x480 framebuffer.
+ *
+ * The CSI task calls this only while it holds a completed source buffer. A
+ * five-fps limit keeps the CPU scaler from taking the time the web encoder
+ * needs; neither its codec selection nor viewer accounting is changed.
+ */
+#include "capture_priv.h"
+#include "capture.h"
+
+#include <string.h>
+
+#include "esp_cache.h"
+#include "esp_ldo_regulator.h"
+#include "esp_lcd_mipi_dsi.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "driver/i2c_master.h"
+#include "soc/mipi_dsi_host_struct.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#if CONFIG_KVM_DSI_PREVIEW
+
+#define TAG "dsi_preview"
+#define LCD_W 640u
+#define LCD_H 480u
+#define LCD_FB_BYTES (LCD_W * LCD_H * 3u)
+#define PREVIEW_INTERVAL_US 200000
+
+static esp_ldo_channel_handle_t s_phy_power;
+static i2c_master_dev_handle_t s_ws_control;
+static esp_lcd_dsi_bus_handle_t s_bus;
+static esp_lcd_panel_handle_t s_panel;
+static uint8_t *s_fb;
+static int64_t s_last_frame_us;
+static uint32_t s_last_w;
+static uint32_t s_last_h;
+static uint32_t s_frames;
+static int64_t s_report_us;
+
+static void preview_cleanup(void)
+{
+    if (s_panel) {
+        esp_lcd_panel_del(s_panel);
+        s_panel = NULL;
+    }
+    if (s_bus) {
+        esp_lcd_del_dsi_bus(s_bus);
+        s_bus = NULL;
+    }
+    if (s_phy_power) {
+        esp_ldo_release_channel(s_phy_power);
+        s_phy_power = NULL;
+    }
+    if (s_ws_control) {
+        i2c_master_bus_rm_device(s_ws_control);
+        s_ws_control = NULL;
+    }
+    s_fb = NULL;
+}
+
+static void waveshare_control_write(uint8_t reg, uint8_t value)
+{
+    if (!s_ws_control) {
+        return;
+    }
+    const uint8_t command[2] = {reg, value};
+    esp_err_t err = i2c_master_transmit(s_ws_control, command, sizeof(command), 100);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Waveshare control register 0x%02x write failed: %s",
+                 reg, esp_err_to_name(err));
+    }
+}
+
+static void waveshare_control_init(void)
+{
+    i2c_master_bus_handle_t bus = capture_i2c_bus();
+    if (!bus) {
+        ESP_LOGW(TAG, "display control probe skipped: shared I2C bus unavailable");
+        return;
+    }
+    const bool touch14 = i2c_master_probe(bus, 0x14, 100) == ESP_OK;
+    const bool touch5d = i2c_master_probe(bus, 0x5d, 100) == ESP_OK;
+    const bool bridge45 = i2c_master_probe(bus, 0x45, 100) == ESP_OK;
+    ESP_LOGI(TAG, "display I2C probe: touch 0x14=%d 0x5d=%d bridge 0x45=%d",
+             touch14, touch5d, bridge45);
+    if (!bridge45) {
+        return;
+    }
+    const i2c_device_config_t config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = 0x45,
+        .scl_speed_hz = 100000,
+    };
+    esp_err_t err = i2c_master_bus_add_device(bus, &config, &s_ws_control);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Waveshare display control setup failed: %s", esp_err_to_name(err));
+        return;
+    }
+    /* Mainline Linux's Waveshare DSI2DPI bridge driver initializes the
+     * controller through these three registers before enabling DSI video. */
+    waveshare_control_write(0xc0, 0x01);
+    waveshare_control_write(0xc2, 0x01);
+    waveshare_control_write(0xac, 0x01);
+}
+
+static void fill_startup_pattern(void)
+{
+    /* A checkerboard is deliberately unlike the ICN6211's internal color-bar
+     * test pattern. It distinguishes a working DSI video link from the panel
+     * merely powering up with no usable signal. */
+    for (uint32_t y = 0; y < LCD_H; ++y) {
+        for (uint32_t x = 0; x < LCD_W; ++x) {
+            uint8_t *p = s_fb + ((size_t)y * LCD_W + x) * 3u;
+            bool yellow = ((x / 80u) + (y / 60u)) & 1u;
+            p[0] = yellow ? 255 : 0;
+            p[1] = yellow ? 255 : 0;
+            p[2] = 0;
+        }
+    }
+    (void)esp_cache_msync(s_fb, LCD_FB_BYTES,
+                          ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
+void capture_dsi_preview_init(void)
+{
+    waveshare_control_init();
+    const esp_ldo_channel_config_t ldo_cfg = {
+        .chan_id = 3, /* Function EV: LDO_VO3 -> VDD_MIPI_DPHY */
+        .voltage_mv = 2500,
+    };
+    esp_err_t err = esp_ldo_acquire_channel(&ldo_cfg, &s_phy_power);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    const esp_lcd_dsi_bus_config_t bus_cfg = {
+        .bus_id = 0,
+        .num_data_lanes = 1,
+        .lane_bit_rate_mbps = 800,
+    };
+    err = esp_lcd_new_dsi_bus(&bus_cfg, &s_bus);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+
+    const esp_lcd_dpi_panel_config_t dpi_cfg = {
+        .virtual_channel = 0,
+        .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
+        .dpi_clock_freq_mhz = 24,
+        .in_color_format = LCD_COLOR_FMT_RGB888,
+        .out_color_format = LCD_COLOR_FMT_RGB888,
+        .num_fbs = 1,
+        .video_timing = {
+            .h_size = LCD_W,
+            .v_size = LCD_H,
+            .hsync_front_porch = 48,
+            .hsync_pulse_width = 32,
+            .hsync_back_porch = 80,
+            .vsync_front_porch = 3,
+            .vsync_pulse_width = 4,
+            .vsync_back_porch = 13,
+        },
+    };
+    err = esp_lcd_new_panel_dpi(s_bus, &dpi_cfg, &s_panel);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    err = esp_lcd_dpi_panel_get_frame_buffer(s_panel, 1, (void **)&s_fb);
+    if (err != ESP_OK || !s_fb) {
+        goto fail;
+    }
+    fill_startup_pattern();
+    /* The Waveshare DT overlay requests plain MIPI_DSI_MODE_VIDEO (non-burst).
+     * IDF currently hardcodes burst video and per-frame BTA acknowledgements
+     * for all DPI panels; this generic bridge has no DSI command response.
+     * Set these before panel_init starts video output. */
+    MIPI_DSI_HOST.vid_mode_cfg.vid_mode_type = 0; /* non-burst, sync pulses */
+    MIPI_DSI_HOST.vid_mode_cfg.frame_bta_ack_en = 0;
+    err = esp_lcd_panel_init(s_panel);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    waveshare_control_write(0xad, 0x01);
+    ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, 5 updates/s");
+    return;
+
+fail:
+    ESP_LOGE(TAG, "DSI preview unavailable: %s; capture and browser continue",
+             esp_err_to_name(err));
+    preview_cleanup();
+}
+
+bool capture_dsi_preview_due(void)
+{
+    return s_fb && esp_timer_get_time() - s_last_frame_us >= PREVIEW_INTERVAL_US;
+}
+
+static uint8_t clamp8(int v)
+{
+    return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+}
+
+static void source_pixel(const uint8_t *src, uint32_t src_w, uint32_t x, uint32_t y,
+                         const capture_pixfmt_t *fmt, uint8_t *dst)
+{
+    const size_t pos = (size_t)y * src_w + x;
+    if (fmt->bpp == 24) {
+        const uint8_t *p = src + pos * 3u;
+        if (strcmp(fmt->name, "bgr888") == 0) {
+            dst[0] = p[2]; dst[1] = p[1]; dst[2] = p[0];
+        } else {
+            dst[0] = p[0]; dst[1] = p[1]; dst[2] = p[2];
+        }
+        return;
+    }
+
+    /* Packed 4:2:2: the TC358743 uses UYVY; the LT6911D uses YUYV. */
+    const uint8_t *p = src + (pos & ~(size_t)1u) * 2u;
+    const int luma = fmt->luma_first ? p[(x & 1u) ? 2 : 0]
+                                       : p[(x & 1u) ? 3 : 1];
+    const int u = (fmt->luma_first ? p[1] : p[0]) - 128;
+    const int v = (fmt->luma_first ? p[3] : p[2]) - 128;
+    const int yy = 298 * (luma - 16);
+    dst[0] = clamp8((yy + 409 * v + 128) >> 8);
+    dst[1] = clamp8((yy - 100 * u - 208 * v + 128) >> 8);
+    dst[2] = clamp8((yy + 516 * u + 128) >> 8);
+}
+
+void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
+                               const capture_pixfmt_t *fmt)
+{
+    if (!capture_dsi_preview_due() || !src || !width || !height || !fmt ||
+        (fmt->bpp != 16 && fmt->bpp != 24)) {
+        return;
+    }
+    s_last_frame_us = esp_timer_get_time();
+
+    /* Preserve the source aspect ratio, with black bars rather than stretching
+     * the Xbox's 16:9 modes into the panel's 4:3 glass. */
+    uint32_t out_w = LCD_W;
+    uint32_t out_h = (uint32_t)((uint64_t)height * LCD_W / width);
+    if (out_h > LCD_H) {
+        out_h = LCD_H;
+        out_w = (uint32_t)((uint64_t)width * LCD_H / height);
+    }
+    if (!out_w || !out_h) {
+        return;
+    }
+    const uint32_t x0 = (LCD_W - out_w) / 2u;
+    const uint32_t y0 = (LCD_H - out_h) / 2u;
+    if (width != s_last_w || height != s_last_h) {
+        memset(s_fb, 0, LCD_FB_BYTES);
+        s_last_w = width;
+        s_last_h = height;
+        ESP_LOGI(TAG, "preview input %lux%lu -> %lux%lu", (unsigned long)width,
+                 (unsigned long)height, (unsigned long)out_w, (unsigned long)out_h);
+    }
+    for (uint32_t dy = 0; dy < out_h; ++dy) {
+        const uint32_t sy = (uint32_t)((uint64_t)dy * height / out_h);
+        uint8_t *line = s_fb + ((size_t)(dy + y0) * LCD_W + x0) * 3u;
+        for (uint32_t dx = 0; dx < out_w; ++dx) {
+            const uint32_t sx = (uint32_t)((uint64_t)dx * width / out_w);
+            source_pixel(src, width, sx, sy, fmt, line + dx * 3u);
+        }
+    }
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "frame submit failed: %s", esp_err_to_name(err));
+    }
+    s_frames++;
+    const int64_t now = esp_timer_get_time();
+    if (now - s_report_us >= 10000000) {
+        ESP_LOGI(TAG, "preview: %lu updates in %lu ms", (unsigned long)s_frames,
+                 (unsigned long)((now - s_report_us) / 1000));
+        s_frames = 0;
+        s_report_us = now;
+    }
+}
+
+#else
+
+void capture_dsi_preview_init(void) {}
+bool capture_dsi_preview_due(void) { return false; }
+void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
+                               const capture_pixfmt_t *fmt)
+{
+    (void)src; (void)width; (void)height; (void)fmt;
+}
+
+#endif

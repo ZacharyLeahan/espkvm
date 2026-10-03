@@ -12,6 +12,7 @@ idf_component_register(
         "capture_flat.c"
         "capture_flat_scan.c"
         "capture_snapshot.c"
+        "capture_dsi_preview.c"
         "h264_probe.c"
         "video_frame.c"
     INCLUDE_DIRS "include"
@@ -34,6 +35,7 @@ idf_component_register(
         esp_driver_isp
         esp_driver_jpeg
         esp_hw_support
+        esp_lcd
         esp_psram
         esp_mm
         esp_timer

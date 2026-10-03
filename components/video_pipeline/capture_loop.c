@@ -114,6 +114,10 @@ void capture_loop_run(capture_ctx_t *c)
         return;
     }
 
+    /* Preview gets its own DSI framebuffer. A panel failure must not prevent
+     * HDMI capture or the browser console from starting. */
+    capture_dsi_preview_init();
+
     int64_t hdmi_recover_cooldown_until_us = 0;
     int64_t switch_retry_us = 0; /* after a refused codec switch */
     int64_t last_encode_us = 0;
@@ -284,8 +288,29 @@ void capture_loop_run(capture_ctx_t *c)
          * frame period.
          */
         if (video_frame_viewer_count() == 0) {
-            /* Nobody to encode for - but a watch set to look for words on the
-             * screen exists for exactly this state, so give it the frame. */
+            /* The local panel still needs raw frames when no browser is open.
+             * Hold the completed CSI buffer exactly as the encoder does, so
+             * free-running DMA cannot overwrite it during the small copy. */
+            if (capture_dsi_preview_due()) {
+                portENTER_CRITICAL(&c->fb_lock);
+                const int preview_idx = c->ready_fb_idx;
+                c->held_fb_idx = preview_idx;
+                portEXIT_CRITICAL(&c->fb_lock);
+                if (preview_idx >= 0 && capture_park_frame_begin()) {
+                    void *preview_src = c->fb[preview_idx];
+                    if (esp_cache_msync(preview_src, c->frame_bytes,
+                                        ESP_CACHE_MSYNC_FLAG_DIR_M2C) == ESP_OK) {
+                        capture_dsi_preview_frame(preview_src, c->hres, c->vres,
+                                                  capture_pixfmt());
+                    }
+                    capture_park_frame_end();
+                }
+                portENTER_CRITICAL(&c->fb_lock);
+                c->held_fb_idx = -1;
+                portEXIT_CRITICAL(&c->fb_lock);
+            }
+            /* A watch set to look for words on the screen exists for exactly
+             * this state too, so keep giving it the frame. */
             capture_screentext_idle(c);
             continue;
         }
@@ -344,6 +369,7 @@ void capture_loop_run(capture_ctx_t *c)
          * text mode that has stopped moving. */
         capture_screentext_tick(c, src);
         capture_flat_tick(c, src);
+        capture_dsi_preview_frame(src, c->hres, c->vres, capture_pixfmt());
 
 #if CAPTURE_YUV_SWAP
         /*

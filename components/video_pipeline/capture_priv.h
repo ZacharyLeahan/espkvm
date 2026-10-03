@@ -19,6 +19,13 @@
 
 #define CAPTURE_LOG_TAG "video"
 
+/* Optional local DSI preview; it consumes the held raw frame without changing
+ * the browser codec or its frame store. Stubs keep non-DSI boards unchanged. */
+void capture_dsi_preview_init(void);
+bool capture_dsi_preview_due(void);
+void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
+                               const capture_pixfmt_t *fmt);
+
 /*
  * Frame-buffer ring depth. With a synchronous encode the encoder holds one
  * buffer for the whole encode; two buffers then leave the free-running CSI just

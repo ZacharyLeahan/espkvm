@@ -49,6 +49,18 @@ menu "ESP-KVM"
                 below. Off unless switched on in settings, and it does nothing
                 when no panel is connected, so it is safe to build into every board.
 
+        config KVM_DSI_PREVIEW
+            bool "Experimental 3.5-inch Waveshare DSI HDMI preview"
+            depends on KVM_BOARD_FUNCEV
+            default n
+            help
+                Drive the 640x480 Waveshare 3.5inch DSI LCD (E) from the
+                Function EV Board's MIPI DISPLAY connector. This experimental
+                local preview is independent of the browser video stream and
+                is limited to 5 updates per second. The attached LCD has so
+                far shown only its own color bars; do not enable this as a
+                supported display profile until DSI video is verified.
+
         config KVM_GC9A01_SPI_HOST
             int "Round SPI LCD (GC9A01) SPI host (2 = SPI2)"
             depends on KVM_ENABLE_DISPLAY
