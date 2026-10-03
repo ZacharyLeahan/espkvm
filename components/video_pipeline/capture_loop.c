@@ -369,7 +369,6 @@ void capture_loop_run(capture_ctx_t *c)
          * text mode that has stopped moving. */
         capture_screentext_tick(c, src);
         capture_flat_tick(c, src);
-        capture_dsi_preview_frame(src, c->hres, c->vres, capture_pixfmt());
 
 #if CAPTURE_YUV_SWAP
         /*
@@ -410,6 +409,10 @@ void capture_loop_run(capture_ctx_t *c)
         esp_err_t ee = codec->encode(c, src, force_publish);
         if (ee == ESP_OK) {
             force_publish = false;
+            /* Publish remote output first. The LCD has a much smaller budget
+             * while consumers exist, and must read the original raw buffer
+             * rather than the codec's optional reordered YUV copy. */
+            capture_dsi_preview_frame(c->fb[hidx], c->hres, c->vres, capture_pixfmt());
         } else if (codec != capture_codec_mjpeg() &&
                    (ee == ESP_ERR_NO_MEM || capture_h264_encoder_failed())) {
             /*

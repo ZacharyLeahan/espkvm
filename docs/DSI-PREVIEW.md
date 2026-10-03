@@ -26,6 +26,23 @@ idf.py -B build.dsi-live -D SDKCONFIG=build.dsi-live/sdkconfig \
 The first live trial retains the ten-second diagnostic pause and limits LCD
 updates to 5 fps. These are bring-up settings, not performance claims.
 
+The subsequent viewer-aware policy targets up to 30 LCD updates/s with no
+encoded-frame consumers, bounded to 80% measured copy duty. When a remote
+viewer (or another consumer counted by the frame store) connects, encoding
+runs first and the LCD drops to at most 1 update/s and 5% copy duty. Thermal
+limits can reduce these further. Disconnecting restores the local budget
+automatically. These are ceilings, not guaranteed rates; Wi-Fi and control
+tasks retain time in LCD-only mode. HDMI capture and LCD scanout clocks stay
+unchanged. Scaler source columns are cached instead of dividing per pixel.
+
+At 720p the first policy test measured 199 LCD updates per roughly ten seconds
+(about 20 fps) with no viewer. A 45.7-second MJPEG connection switched priority
+to remote, kept the LCD below 1 fps, and completed without reconnects. That
+scene delivered only nine JPEGs with skipped-frame counters active, so it
+does not establish moving-video throughput. Disconnecting restored LCD
+priority automatically. Local and remote limits are separate from HDMI's
+60 Hz input and the panel's scanout rate.
+
 The live test detected 1280x720p60 HDMI and fitted it into 640x360 on the
 640x480 panel. Serial counters measured about 4.6 LCD updates/s without a
 browser viewer and about 3 updates/s while MJPEG was also streaming. The

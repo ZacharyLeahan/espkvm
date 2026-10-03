@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Give the LCD a larger adaptive copy budget without remote viewers; prioritize
+  encoding and limit LCD updates to at most 1 fps when viewers connect. Cache
+  scaler coordinates and respect thermal throttling in both modes.
 - Bound Xbox-profile TCP receive/send buffers to 8 KiB and receive mailboxes
   to eight entries. A ten-minute local test completed with zero reconnects;
   document exact settings, frame gaps, reboot recovery, and the 720p game check.

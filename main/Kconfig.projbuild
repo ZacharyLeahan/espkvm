@@ -57,7 +57,8 @@ menu "ESP-KVM"
                 Drive the 640x480 Waveshare 3.5inch DSI LCD (E) from the
                 Function EV Board's MIPI DISPLAY connector. This experimental
                 local preview is independent of the browser video stream and
-                is limited to 5 updates per second. A standalone framebuffer
+                targets up to 30 updates/s alone, at most 1 with remote viewers,
+                with measured copy-duty and thermal limits. A standalone framebuffer
                 has been verified; live capture remains experimental.
 
         config KVM_DSI_PREVIEW_HOST_PATTERN

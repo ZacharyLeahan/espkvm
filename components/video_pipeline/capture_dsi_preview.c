@@ -8,11 +8,12 @@
  * timing: every captured mode is fitted into this fixed 640x480 framebuffer.
  *
  * The CSI task calls this only while it holds a completed source buffer. A
- * five-fps limit keeps the CPU scaler from taking the time the web encoder
- * needs; neither its codec selection nor viewer accounting is changed.
+ * viewer-aware budget gives the local panel spare time without competing
+ * with remote encoding; codec selection and viewer accounting are unchanged.
  */
 #include "capture_priv.h"
 #include "capture.h"
+#include "kvm_thermal.h"
 
 #include <string.h>
 
@@ -40,7 +41,8 @@
 #define LCD_W 640u
 #define LCD_H 480u
 #define LCD_FB_BYTES (LCD_W * LCD_H * 3u)
-#define PREVIEW_INTERVAL_US 200000
+#define PREVIEW_LOCAL_FPS 30
+#define PREVIEW_REMOTE_FPS 1
 #define ICN_READ_TIMEOUT_US 100000
 
 static esp_ldo_channel_handle_t s_phy_power;
@@ -50,6 +52,9 @@ static esp_lcd_panel_io_handle_t s_dbi_io;
 static esp_lcd_panel_handle_t s_panel;
 static uint8_t *s_fb;
 static int64_t s_last_frame_us;
+static int64_t s_last_cost_us;
+static int s_last_priority = -1;
+static uint32_t s_source_x[LCD_W];
 static uint32_t s_last_w;
 static uint32_t s_last_h;
 static uint32_t s_frames;
@@ -516,7 +521,7 @@ void capture_dsi_preview_init(void)
 #endif
     vTaskDelay(pdMS_TO_TICKS(100));
     log_dsi_link("startup");
-    ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, 5 updates/s");
+    ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, viewer-aware budget");
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
     icn6211_inspect_video();
 #endif
@@ -530,7 +535,24 @@ fail:
 
 bool capture_dsi_preview_due(void)
 {
-    return s_fb && esp_timer_get_time() - s_last_frame_us >= PREVIEW_INTERVAL_US;
+    const bool remote = video_frame_viewer_count() > 0;
+    const int fps = kvm_thermal_fps_limit(remote ? PREVIEW_REMOTE_FPS : PREVIEW_LOCAL_FPS);
+    if (!s_fb || fps <= 0) {
+        return false;
+    }
+    if (s_last_priority != (int)remote) {
+        s_last_priority = remote;
+        ESP_LOGI(TAG, "priority: %s", remote ? "remote (LCD <=1 fps, <=5% copy duty)"
+                                            : "LCD (<=30 fps, <=80% copy duty)");
+    }
+    /* Bound CPU work as well as FPS. Always leave time for network/control
+     * tasks, and back off automatically when the scaler takes longer. */
+    int64_t interval = 1000000 / fps;
+    const int64_t budget = remote ? s_last_cost_us * 20 : s_last_cost_us * 5 / 4;
+    if (budget > interval) {
+        interval = budget;
+    }
+    return esp_timer_get_time() - s_last_frame_us >= interval;
 }
 
 static uint8_t clamp8(int v)
@@ -539,12 +561,12 @@ static uint8_t clamp8(int v)
 }
 
 static void source_pixel(const uint8_t *src, uint32_t src_w, uint32_t x, uint32_t y,
-                         const capture_pixfmt_t *fmt, uint8_t *dst)
+                         const capture_pixfmt_t *fmt, bool bgr, uint8_t *dst)
 {
     const size_t pos = (size_t)y * src_w + x;
     if (fmt->bpp == 24) {
         const uint8_t *p = src + pos * 3u;
-        if (strcmp(fmt->name, "bgr888") == 0) {
+        if (bgr) {
             dst[0] = p[2]; dst[1] = p[1]; dst[2] = p[0];
         } else {
             dst[0] = p[0]; dst[1] = p[1]; dst[2] = p[2];
@@ -590,15 +612,18 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
         memset(s_fb, 0, LCD_FB_BYTES);
         s_last_w = width;
         s_last_h = height;
+        for (uint32_t dx = 0; dx < out_w; ++dx) {
+            s_source_x[dx] = (uint32_t)((uint64_t)dx * width / out_w);
+        }
         ESP_LOGI(TAG, "preview input %lux%lu -> %lux%lu", (unsigned long)width,
                  (unsigned long)height, (unsigned long)out_w, (unsigned long)out_h);
     }
+    const bool bgr = strcmp(fmt->name, "bgr888") == 0;
     for (uint32_t dy = 0; dy < out_h; ++dy) {
         const uint32_t sy = (uint32_t)((uint64_t)dy * height / out_h);
         uint8_t *line = s_fb + ((size_t)(dy + y0) * LCD_W + x0) * 3u;
         for (uint32_t dx = 0; dx < out_w; ++dx) {
-            const uint32_t sx = (uint32_t)((uint64_t)dx * width / out_w);
-            source_pixel(src, width, sx, sy, fmt, line + dx * 3u);
+            source_pixel(src, width, s_source_x[dx], sy, fmt, bgr, line + dx * 3u);
         }
     }
     esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
@@ -611,9 +636,10 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
         log_dsi_link("stream");
     }
     const int64_t now = esp_timer_get_time();
+    s_last_cost_us = now - s_last_frame_us;
     if (now - s_report_us >= 10000000) {
-        ESP_LOGI(TAG, "preview: %lu updates in %lu ms", (unsigned long)s_frames,
-                 (unsigned long)((now - s_report_us) / 1000));
+        ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us", (unsigned long)s_frames,
+                 (unsigned long)((now - s_report_us) / 1000), (unsigned long)s_last_cost_us);
         s_frames = 0;
         s_report_us = now;
     }
