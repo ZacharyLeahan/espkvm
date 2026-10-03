@@ -41,16 +41,31 @@ other ratios and YUV retain CPU scaling. See Espressif's
 [PPA documentation](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32p4/api-reference/peripherals/ppa.html).
 The driver invalidates the DMA destination. CPU-written letterboxing is
 flushed on geometry changes. Two DSI buffers separate rendering from scanout;
-after submission the previous buffer is not reused until two DMA completions
-have passed, covering an ISR already in flight at submission.
+after submission the previous buffer is not reused until a DMA completion
+has selected the new buffer. If the callback runs on another core, a second
+completion is required to cover an ISR already in flight at submission.
 At 1280x720 -> 640x360, measurements were about 27.7 ms per update and
 29.4 updates/s with the 90% budget. At 80% the same hardware path delivered
 about 20 updates/s because it missed the next available input frame.
 The 60 fps ceiling is not a measured achievement. The user reported horizontal
 splits at 29.4 fps with one buffer, and still saw splits at about 20 fps with
-two buffers. The current CPU-only two-buffer control measures about 15 fps;
-its visual result is pending. PPA therefore remains disabled by default.
-These experiments have not established a faster tear-free configuration.
+two buffers. The CPU-only two-buffer control measured about 15 fps and was
+visually confirmed smooth. Shortening the same-core handoff wait recovered
+about 20 fps at 720p, and a subsequent 480p test also measured about 20 fps.
+PPA remains disabled by default; the higher-rate PPA trial is not a clean
+video success.
+
+The CPU now has an exact 2:1 RGB888 packed-copy path for 720p. Its byte output
+was checked against nearest-neighbor reference output for widths 1-640,
+unaligned pointers, and randomized pixels under AddressSanitizer and UBSan:
+
+```sh
+cc -O2 -Wall -Wextra -fsanitize=address,undefined tools/test_lcd_rgb_half.c -o /tmp/test-lcd-rgb-half
+/tmp/test-lcd-rgb-half
+```
+
+Hardware timing for that specific fast path is pending a return to 720p;
+the Xbox switched to 480p during the test, which uses the general CPU scaler.
 
 At 720p the first policy test measured 199 LCD updates per roughly ten seconds
 (about 20 fps) with no viewer. A 45.7-second MJPEG connection switched priority

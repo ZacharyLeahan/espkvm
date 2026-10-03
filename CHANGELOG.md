@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Shorten LCD buffer handoff only for same-core DMA callbacks and add an
+  alias-safe packed RGB half-scaler, with randomized reference tests. Keep
+  PPA off: the CPU double-buffer control was visually confirmed smooth.
 - Add opt-in PPA scaling for exact RGB LCD ratios and double-buffered display
   handoff. A single-buffer 720p trial reached 29.4 updates/s but showed tearing;
   PPA remains disabled pending visual validation. Remote priority is unchanged.

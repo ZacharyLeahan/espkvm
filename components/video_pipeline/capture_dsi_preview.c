@@ -13,6 +13,7 @@
  */
 #include "capture_priv.h"
 #include "capture.h"
+#include "lcd_rgb_half.h"
 #include "kvm_thermal.h"
 
 #include <string.h>
@@ -69,6 +70,7 @@ static uint32_t s_frames;
 static int64_t s_report_us;
 static bool s_link_logged;
 static volatile uint32_t s_dma_frames;
+static volatile int s_dma_core = -1;
 
 static bool on_dsi_frame_complete(esp_lcd_panel_handle_t panel,
                                   esp_lcd_dpi_panel_event_data_t *event_data, void *user_ctx)
@@ -76,6 +78,7 @@ static bool on_dsi_frame_complete(esp_lcd_panel_handle_t panel,
     (void)panel;
     (void)event_data;
     (void)user_ctx;
+    s_dma_core = xPortGetCoreID();
     ++s_dma_frames;
     return false;
 }
@@ -693,6 +696,10 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     for (uint32_t dy = 0; !accelerated && dy < out_h; ++dy) {
         const uint32_t sy = (uint32_t)((uint64_t)dy * height / out_h);
         uint8_t *line = s_fb + ((size_t)(dy + y0) * LCD_W + x0) * 3u;
+        if (fmt->bpp == 24 && !bgr && width == out_w * 2u) {
+            lcd_rgb_half_line((const uint8_t *)src + (size_t)sy * width * 3u, line, out_w);
+            continue;
+        }
         for (uint32_t dx = 0; dx < out_w; ++dx) {
             source_pixel(src, width, s_source_x[dx], sy, fmt, bgr, line + dx * 3u);
         }
@@ -702,9 +709,10 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
         ESP_LOGW(TAG, "frame submit failed: %s", esp_err_to_name(err));
         return;
     }
-    /* DMA completion selects the submitted buffer before our callback. Allow
-     * two completions to cover an ISR already in flight at submission. */
-    s_reuse_after = s_dma_frames + 2;
+    /* A same-core ISR completes before this task can resume, so the first
+     * completion after submission has switched away from the old buffer.
+     * Cross-core callbacks may already be in flight: allow two in that case. */
+    s_reuse_after = s_dma_frames + (s_dma_core == xPortGetCoreID() ? 1u : 2u);
     s_draw_index ^= 1u;
     s_fb = s_buffers[s_draw_index];
     s_frames++;
