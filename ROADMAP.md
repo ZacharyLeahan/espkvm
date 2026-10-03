@@ -55,4 +55,20 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - AmneziaWG - the obfuscated WireGuard fork, on top of the WireGuard client that is already here: junk packets before the handshake, junk inside it, and message types of its own ([#44](https://github.com/espkvm/espkvm/issues/44)). Asked for; it needs a server to test against
 - Yggdrasil - a decentralised overlay as an alternative to the WireGuard/Tailscale backends
 
+## Original Xbox fork idea: local touchscreen controller
+
+After the proposed [Xbox controller input mode](docs/XBOX-REMOTE-CONTROLLER.md)
+works, add a small MIPI-DSI touchscreen to the ESP32-P4 Function EV Board. Show
+the captured Xbox video locally with a small controller icon; tapping it opens
+a larger, dismissible on-screen controller. Route touch buttons, triggers, and
+virtual sticks through the same controller-state path as the browser controls.
+Release held inputs on touch-up or lost contact so a stalled touch cannot leave
+a button pressed.
+
+The Waveshare 3.5inch DSI LCD (E), 640x480, now has an experimental local Xbox
+video preview; see [tested settings and limitations](docs/DSI-PREVIEW.md).
+Touch controls and overlay rendering are still unimplemented, and simultaneous
+local/remote performance needs further testing. This does not replace the Xbox
+controller-port hardware or XID implementation.
+
 Have a use case that is not here? Open a discussion.
