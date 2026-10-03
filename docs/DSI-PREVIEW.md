@@ -27,8 +27,8 @@ The first live trial retains the ten-second diagnostic pause and limits LCD
 updates to 5 fps. These are bring-up settings, not performance claims.
 
 The subsequent viewer-aware policy targets up to 60 LCD updates/s with no
-encoded-frame consumers, bounded to 80% measured CPU-copy duty or 90% measured
-hardware-scaler duty. When a remote
+encoded-frame consumers, bounded to 80% measured general CPU-copy duty or 90%
+for the packed RGB half-scaler and experimental hardware scaler. When a remote
 viewer (or another consumer counted by the frame store) connects, encoding
 runs first and the LCD drops to at most 1 update/s and 5% copy duty. Thermal
 limits can reduce these further. Disconnecting restores the local budget
@@ -64,8 +64,12 @@ cc -O2 -Wall -Wextra -fsanitize=address,undefined tools/test_lcd_rgb_half.c -o /
 /tmp/test-lcd-rgb-half
 ```
 
-Hardware timing for that specific fast path is pending a return to 720p;
-the Xbox switched to 480p during the test, which uses the general CPU scaler.
+After returning to 720p, the packed CPU path measured about 29-30 ms per copy
+and 20 LCD updates/s. Raising its local work budget from 80% to 90% did not
+raise measured output: double-buffer handoff still limits presentation.
+The user confirmed the 480p game looked good; visual confirmation of this
+latest 720p test remains separate from the counters. Do not advertise 30 or
+60 fps for this CPU configuration.
 
 At 720p the first policy test measured 199 LCD updates per roughly ten seconds
 (about 20 fps) with no viewer. A 45.7-second MJPEG connection switched priority

@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Identify packed CPU scaling in LCD diagnostics and test a 90% local budget
+  for that path. The measured 720p output remains about 20 fps; preserve the
+  separate low-rate remote-viewer policy.
 - Shorten LCD buffer handoff only for same-core DMA callbacks and add an
   alias-safe packed RGB half-scaler, with randomized reference tests. Keep
   PPA off: the CPU double-buffer control was visually confirmed smooth.

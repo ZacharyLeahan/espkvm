@@ -59,7 +59,7 @@ static bool s_clear_buffer[2] = {true, true};
 static uint32_t s_reuse_after;
 static int64_t s_last_frame_us;
 static int64_t s_last_cost_us;
-static bool s_last_accelerated;
+static bool s_last_fast_path;
 static int s_last_priority = -1;
 static uint32_t s_source_x[LCD_W];
 static ppa_client_handle_t s_scaler;
@@ -563,13 +563,13 @@ bool capture_dsi_preview_due(void)
     if (s_last_priority != (int)remote) {
         s_last_priority = remote;
         ESP_LOGI(TAG, "priority: %s", remote ? "remote (LCD <=1 fps, <=5% copy duty)"
-                                            : "LCD (<=60 fps, CPU<=80% / PPA<=90% duty)");
+                                            : "LCD (<=60 fps, general<=80% / fast<=90% duty)");
     }
     /* Bound CPU work as well as FPS. Always leave time for network/control
      * tasks, and back off automatically when the scaler takes longer. */
     int64_t interval = 1000000 / fps;
     const int64_t budget = remote ? s_last_cost_us * 20 :
-        (s_last_accelerated ? s_last_cost_us * 10 / 9 : s_last_cost_us * 5 / 4);
+        (s_last_fast_path ? s_last_cost_us * 10 / 9 : s_last_cost_us * 5 / 4);
     if (budget > interval) {
         interval = budget;
     }
@@ -693,10 +693,11 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     }
     const bool accelerated = scale_hardware(src, width, height, out_w, out_h, x0, y0, fmt);
     const bool bgr = strcmp(fmt->name, "bgr888") == 0;
+    const bool packed_half = fmt->bpp == 24 && !bgr && width == out_w * 2u;
     for (uint32_t dy = 0; !accelerated && dy < out_h; ++dy) {
         const uint32_t sy = (uint32_t)((uint64_t)dy * height / out_h);
         uint8_t *line = s_fb + ((size_t)(dy + y0) * LCD_W + x0) * 3u;
-        if (fmt->bpp == 24 && !bgr && width == out_w * 2u) {
+        if (packed_half) {
             lcd_rgb_half_line((const uint8_t *)src + (size_t)sy * width * 3u, line, out_w);
             continue;
         }
@@ -722,11 +723,11 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     }
     const int64_t now = esp_timer_get_time();
     s_last_cost_us = now - s_last_frame_us;
-    s_last_accelerated = accelerated;
+    s_last_fast_path = accelerated || packed_half;
     if (now - s_report_us >= 10000000) {
         ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us (%s)", (unsigned long)s_frames,
                  (unsigned long)((now - s_report_us) / 1000), (unsigned long)s_last_cost_us,
-                 accelerated ? "PPA" : "CPU");
+                 accelerated ? "PPA" : (packed_half ? "CPU packed" : "CPU"));
         s_frames = 0;
         s_report_us = now;
     }
