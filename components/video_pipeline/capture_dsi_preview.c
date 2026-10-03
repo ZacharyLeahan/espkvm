@@ -207,6 +207,13 @@ void capture_dsi_preview_init(void)
     if (err != ESP_OK) {
         goto fail;
     }
+#if CONFIG_KVM_DSI_PREVIEW_HOST_PATTERN
+    err = esp_lcd_dpi_panel_set_pattern(s_panel, MIPI_DSI_PATTERN_BAR_VERTICAL);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    ESP_LOGW(TAG, "DSI host vertical-bar diagnostic active; Xbox preview hidden");
+#endif
     waveshare_control_write(0xad, 0x01);
     vTaskDelay(pdMS_TO_TICKS(100));
     log_dsi_link("startup");

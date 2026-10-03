@@ -51,9 +51,20 @@ fails to start, which is why bars cannot be treated as successful output.
 
 ## Next diagnostic
 
-Before more timing guesses, identify the display board's DSI bridge/controller
-and its required reset, power, or initialization sequence, then compare that
-with the ESP32-P4 Function EV DSI connector and Waveshare's panel schematic.
-Do not flip or reseat either ribbon while powered. A Raspberry Pi known-good
-test of this exact LCD would also separate panel hardware failure from an ESP
-driver incompatibility.
+`CONFIG_KVM_DSI_PREVIEW_HOST_PATTERN` enables the ESP's **vertical** DSI test
+bars instead of the framebuffer. This distinguishes an ESP-generated picture
+from the LCD's existing **horizontal** bars without involving the Xbox capture
+path. It is disabled by default. The visual outcome has not yet been confirmed.
+
+The [Espressif board guide](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4-function-ev-board/user_guide.html)
+calls for a reverse-contact LCD ribbon. The photos appear consistent with one,
+and the [board schematic](https://dl.espressif.com/dl/schematics/esp32-p4-function-ev-board-schematics_v1.52.pdf)
+matches Waveshare's published DSI connector pinout. This still does not
+establish that high-speed DSI pairs are making reliable contact. Do not flip
+or reseat either ribbon while powered.
+
+If the ESP host pattern fails too, identify the display board's DSI bridge
+initialization/reset sequence and test this exact LCD with a known-good
+Raspberry Pi before more timing guesses. The board in our photos carries an
+ICN6211 DSI-to-RGB bridge and a Nuvoton controller; another developer has
+[reported this model not working on ESP32-P4](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184).
