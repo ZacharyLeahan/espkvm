@@ -1,8 +1,8 @@
-# Waveshare 3.5-inch DSI LCD (E): framebuffer verified
+# Waveshare 3.5-inch DSI LCD (E): live Xbox preview verified
 
 This is an **opt-in experiment**, not a supported display feature. The user
-confirmed the standalone yellow/black checkerboard on the physical LCD.
-Live Xbox preview remains to be verified. Keep `CONFIG_KVM_DSI_PREVIEW`
+confirmed both the standalone yellow/black checkerboard and then the live
+Xbox image on the physical LCD. Keep `CONFIG_KVM_DSI_PREVIEW`
 disabled in normal builds. No touchscreen controls are implemented.
 
 The verified checkpoint uses `boards/funcev_dsi_pll.defaults`: one lane at
@@ -12,6 +12,33 @@ pause after ten seconds. Preserve this complete sequence when reproducing
 the test; the necessary subset has not yet been isolated. The bridge's PLL
 registers reverted by the later readback, so successful output does not prove
 those writes alone fixed it. This standalone profile disables CSI capture.
+
+For the live HDMI integration trial, replace the final defaults file with
+`boards/funcev_dsi_live.defaults`. Use a fresh build directory/configuration
+so an older standalone setting does not override these defaults:
+
+```sh
+. tools/env.sh
+idf.py -B build.dsi-live -D SDKCONFIG=build.dsi-live/sdkconfig \
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;boards/funcev_p4.defaults;boards/funcev_xbox.defaults;boards/funcev_dsi_live.defaults' build
+```
+
+The first live trial retains the ten-second diagnostic pause and limits LCD
+updates to 5 fps. These are bring-up settings, not performance claims.
+
+The live test detected 1280x720p60 HDMI and fitted it into 640x360 on the
+640x480 panel. Serial counters measured about 4.6 LCD updates/s without a
+browser viewer and about 3 updates/s while MJPEG was also streaming. The
+60 Hz input rate is not the LCD preview update rate. Initial combined testing
+exposed a camera-task watchdog timeout during the diagnostic wait; servicing
+the watchdog during that bounded wait fixed the observed reboot loop.
+Touch, other input resolutions, sustained stability, and faster preview still
+need verification. Earlier failed trials below are retained for reference.
+
+A 60-second simultaneous local MJPEG request completed without reconnects
+or a new watchdog reset, but delivered only 14 JPEGs (longest delivery gap
+5.52 seconds). This is a connectivity check, not a smooth-video pass;
+moving-scene testing is required before making performance claims.
 
 ## Hardware and known-good capture path
 

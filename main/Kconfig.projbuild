@@ -57,9 +57,8 @@ menu "ESP-KVM"
                 Drive the 640x480 Waveshare 3.5inch DSI LCD (E) from the
                 Function EV Board's MIPI DISPLAY connector. This experimental
                 local preview is independent of the browser video stream and
-                is limited to 5 updates per second. The attached LCD has so
-                far shown only its own color bars; do not enable this as a
-                supported display profile until DSI video is verified.
+                is limited to 5 updates per second. A standalone framebuffer
+                has been verified; live capture remains experimental.
 
         config KVM_DSI_PREVIEW_HOST_PATTERN
             bool "DSI host vertical-bar diagnostic (replaces local preview)"
@@ -92,7 +91,7 @@ menu "ESP-KVM"
 
         config KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
             bool "Clear ICN6211 built-in test-pattern bit for framebuffer test"
-            depends on KVM_DSI_PREVIEW_STANDALONE && !KVM_DSI_PREVIEW_ICN6211_PROBE
+            depends on KVM_DSI_PREVIEW && !KVM_DSI_PREVIEW_ICN6211_PROBE
             default n
             help
                 After confirming the bridge ID, clear only bit 3 of its BIST

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Experimental live preview using the verified standalone startup sequence.
+CONFIG_KVM_DSI_PREVIEW=y
+# CONFIG_KVM_DSI_PREVIEW_STANDALONE is not set
+# CONFIG_KVM_DSI_PREVIEW_HOST_PATTERN is not set
+# CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE is not set
+CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST=y
+CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL=y

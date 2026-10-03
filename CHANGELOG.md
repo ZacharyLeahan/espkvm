@@ -15,9 +15,12 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Verify live 720p Xbox input on the Waveshare 3.5-inch DSI LCD (E), fitted to
+  640x360. Add an opt-in live profile capped at 5 updates/s and service the
+  camera watchdog during the bounded diagnostic startup wait.
 - Verify the Waveshare 3.5-inch DSI LCD (E) standalone checkerboard on hardware
   with a 576 Mb/s one-lane checkpoint, bounded bridge readback, and an opt-in
-  PLL initialization experiment. Live HDMI preview is not yet verified.
+  PLL initialization experiment. Live HDMI was subsequently verified above.
 - Opt-in ICN6211 DSI register probe and isolated test-pattern control for the
   Waveshare 3.5-inch DSI LCD (E). The bridge answers low-power DSI commands,
   but the LCD still does not show the framebuffer; normal builds are unchanged.

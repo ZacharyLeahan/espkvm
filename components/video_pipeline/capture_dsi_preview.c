@@ -28,6 +28,7 @@
 #include "driver/i2c_master.h"
 #include "hal/mipi_dsi_host_ll.h"
 #include "hal/mipi_dsi_brg_ll.h"
+#include "esp_task_wdt.h"
 #include "soc/mipi_dsi_host_struct.h"
 #include "soc/mipi_dsi_bridge_struct.h"
 #include "freertos/FreeRTOS.h"
@@ -309,7 +310,18 @@ static void icn6211_inspect_video(void)
 {
     /* Generic read responses require command mode on this host. Stop DPI
      * first so its DMA source does not continue feeding a stopped video sink. */
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    /* In a live build this runs on the watched camera task. Keep the same
+     * settling interval without mistaking the intentional sleep for a hang.
+     * Standalone startup runs on a task that may not be subscribed. */
+    for (unsigned i = 0; i < 10; ++i) {
+        if (esp_task_wdt_status(NULL) == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    if (esp_task_wdt_status(NULL) == ESP_OK) {
+        esp_task_wdt_reset();
+    }
     log_dsi_link("before paused bridge read");
     mipi_dsi_brg_ll_enable_dpi_output(&MIPI_DSI_BRIDGE, false);
     mipi_dsi_brg_ll_update_dpi_config(&MIPI_DSI_BRIDGE);
