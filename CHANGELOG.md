@@ -26,6 +26,9 @@ bumps the patch).
 - Add opt-in standalone DSI framebuffer diagnostics and DMA/FIFO counters;
   confirm host-generated bars reach the panel, but framebuffer video remains
   unverified and the preview stays disabled by default.
+- Mirror Waveshare's generic ESP DSI startup sequence in the opt-in LCD trial:
+  additional bridge-control writes, a one-second settle, and DCS display-on
+  commands before DPI video. This is not yet validated for the 3.5-inch E.
 - Concise Xbox compatibility/recovery table distinguishing sustained game
   streaming, reboot capture recovery, and the short 720p game observation.
 - Local MJPEG soak-test utility reporting frame delivery gaps and reconnects,

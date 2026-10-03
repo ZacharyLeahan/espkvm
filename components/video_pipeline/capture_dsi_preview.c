@@ -19,6 +19,8 @@
 #include "esp_cache.h"
 #include "esp_ldo_regulator.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_lcd_panel_commands.h"
+#include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -39,6 +41,7 @@
 static esp_ldo_channel_handle_t s_phy_power;
 static i2c_master_dev_handle_t s_ws_control;
 static esp_lcd_dsi_bus_handle_t s_bus;
+static esp_lcd_panel_io_handle_t s_dbi_io;
 static esp_lcd_panel_handle_t s_panel;
 static uint8_t *s_fb;
 static int64_t s_last_frame_us;
@@ -84,6 +87,10 @@ static void preview_cleanup(void)
     if (s_panel) {
         esp_lcd_panel_del(s_panel);
         s_panel = NULL;
+    }
+    if (s_dbi_io) {
+        esp_lcd_panel_io_del(s_dbi_io);
+        s_dbi_io = NULL;
     }
     if (s_bus) {
         esp_lcd_del_dsi_bus(s_bus);
@@ -143,6 +150,9 @@ static void waveshare_control_init(void)
     waveshare_control_write(0xc0, 0x01);
     waveshare_control_write(0xc2, 0x01);
     waveshare_control_write(0xac, 0x01);
+    waveshare_control_write(0xab, 0x00);
+    waveshare_control_write(0xaa, 0x01);
+    waveshare_control_write(0xad, 0x01);
 }
 
 static void fill_startup_pattern(void)
@@ -188,6 +198,36 @@ void capture_dsi_preview_init(void)
     /* Raspberry Pi's VC4 DSI host disables HS end-of-transmission packets for
      * this generic panel; IDF enables them by default. */
     MIPI_DSI_HOST.pckhdl_cfg.eotp_tx_en = 0;
+
+    /* Waveshare's ESP DSI component performs bridge control, waits one second,
+     * then sends MADCTL, sleep-out and display-on DCS commands before starting
+     * DPI video. The Pi overlay does not describe these commands, so keep this
+     * sequence confined to the opt-in experimental preview. */
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    const esp_lcd_dbi_io_config_t dbi_cfg = {
+        .virtual_channel = 0,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
+    err = esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_dbi_io);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    const uint8_t dcs_zero = 0;
+    err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_MADCTL, &dcs_zero, 1);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_SLPOUT, &dcs_zero, 1);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    vTaskDelay(pdMS_TO_TICKS(120));
+    err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_DISPON, &dcs_zero, 1);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     const esp_lcd_dpi_panel_config_t dpi_cfg = {
         .virtual_channel = 0,
@@ -240,7 +280,6 @@ void capture_dsi_preview_init(void)
     }
     ESP_LOGW(TAG, "DSI host vertical-bar diagnostic active; Xbox preview hidden");
 #endif
-    waveshare_control_write(0xad, 0x01);
     vTaskDelay(pdMS_TO_TICKS(100));
     log_dsi_link("startup");
     ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, 5 updates/s");

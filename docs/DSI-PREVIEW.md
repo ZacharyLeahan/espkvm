@@ -121,3 +121,15 @@ this LCD, bridge, and ribbon work with the manufacturer's supported setup.
 If that succeeds, compare the Pi's actual DSI signal/clock behavior with the
 ESP32-P4 host rather than guessing more nominal timing values. A validated
 ESP32-P4 example for this exact model would provide the same missing evidence.
+
+## Waveshare ESP-driver comparison
+
+The [Waveshare `esp_lcd_dsi` component](https://github.com/waveshareteam/Waveshare-ESP32-components/tree/master/display/lcd/esp_lcd_dsi)
+targets other Raspberry-adapter LCD models, **not** this 3.5-inch E. Its
+startup code writes bridge-control registers `c0/c2/ac/ab/aa/ad` at I²C
+address `0x45`, waits one second, and sends DCS `MADCTL`, `SLPOUT`, and
+`DISPON` commands before enabling DPI video. The earlier ESP trial only wrote
+`c0/c2/ac/ad`, skipped the wait and DCS commands, and performed `ad` after
+panel initialization. The current opt-in trial mirrors Waveshare's full
+order, but `0x45` has not acknowledged on this LCD, and this sequence is not
+claimed to support the 3.5-inch E until the checkerboard appears on hardware.
