@@ -28,7 +28,8 @@ bumps the patch).
   unverified and the preview stays disabled by default.
 - Mirror Waveshare's generic ESP DSI startup sequence in the opt-in LCD trial:
   additional bridge-control writes, a one-second settle, and DCS display-on
-  commands before DPI video. This is not yet validated for the 3.5-inch E.
+  commands before DPI video. Hardware testing confirmed this still leaves the
+  3.5-inch E on color bars; normal Xbox capture firmware was restored.
 - Concise Xbox compatibility/recovery table distinguishing sustained game
   streaming, reboot capture recovery, and the short 720p game observation.
 - Local MJPEG soak-test utility reporting frame delivery gaps and reconnects,

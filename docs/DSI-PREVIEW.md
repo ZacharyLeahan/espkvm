@@ -30,6 +30,7 @@ checkerboard nor Xbox pixels have appeared on the LCD.
 | 1 lane at 800 and 600 Mb/s, non-burst sync-event mode | Color bars; arrangement changed |
 | 1 lane at 600 Mb/s, non-burst sync events, HS EoTP disabled | Different colors/arrangement of bars; **still no preview image** |
 | Xbox HDMI unplugged, then ESP reset | Bars still appeared; they are not the Xbox feed |
+| Waveshare generic ESP driver startup order, then standalone checkerboard | Horizontal rainbow bars, never checkerboard; normal capture firmware restored afterward |
 
 The ESP host's vertical-bar generator visibly changed the bars from horizontal
 to vertical. That is evidence of a working DSI physical link, but not of the
@@ -131,5 +132,8 @@ address `0x45`, waits one second, and sends DCS `MADCTL`, `SLPOUT`, and
 `DISPON` commands before enabling DPI video. The earlier ESP trial only wrote
 `c0/c2/ac/ad`, skipped the wait and DCS commands, and performed `ad` after
 panel initialization. The current opt-in trial mirrors Waveshare's full
-order, but `0x45` has not acknowledged on this LCD, and this sequence is not
-claimed to support the 3.5-inch E until the checkerboard appears on hardware.
+order. The LCD still showed horizontal rainbow bars in the October 3 hardware
+test, never the checkerboard. The `0x45` bridge address did not acknowledge on
+this LCD, so the generic driver sequence is **not** a fix for the 3.5-inch E.
+The normal Xbox capture build was reflashed and its local web page returned
+HTTP 200 afterward. The preview remains disabled by default.
