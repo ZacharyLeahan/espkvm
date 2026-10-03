@@ -1,0 +1,5 @@
+# Read-only DSI bridge probe for the Waveshare 3.5-inch DSI LCD (E).
+# Use only in a separate, ignored diagnostic build directory.
+CONFIG_KVM_DSI_PREVIEW=y
+CONFIG_KVM_DSI_PREVIEW_STANDALONE=y
+CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE=y

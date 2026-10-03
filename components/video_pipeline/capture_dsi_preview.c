@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "esp_cache.h"
+#include "esp_check.h"
 #include "esp_ldo_regulator.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_commands.h"
@@ -25,6 +26,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/i2c_master.h"
+#include "hal/mipi_dsi_host_ll.h"
 #include "soc/mipi_dsi_host_struct.h"
 #include "soc/mipi_dsi_bridge_struct.h"
 #include "freertos/FreeRTOS.h"
@@ -37,6 +39,7 @@
 #define LCD_H 480u
 #define LCD_FB_BYTES (LCD_W * LCD_H * 3u)
 #define PREVIEW_INTERVAL_US 200000
+#define ICN_READ_TIMEOUT_US 100000
 
 static esp_ldo_channel_handle_t s_phy_power;
 static i2c_master_dev_handle_t s_ws_control;
@@ -130,8 +133,12 @@ static void waveshare_control_init(void)
     const bool touch14 = i2c_master_probe(bus, 0x14, 100) == ESP_OK;
     const bool touch5d = i2c_master_probe(bus, 0x5d, 100) == ESP_OK;
     const bool bridge45 = i2c_master_probe(bus, 0x45, 100) == ESP_OK;
-    ESP_LOGI(TAG, "display I2C probe: touch 0x14=%d 0x5d=%d bridge 0x45=%d",
-             touch14, touch5d, bridge45);
+    /* ICN6211's two selectable 7-bit I2C addresses are 0x2c/0x2d. This is
+     * an ACK-only probe; its onboard MCU may own a separate I2C bus. */
+    const bool icn2c = i2c_master_probe(bus, 0x2c, 100) == ESP_OK;
+    const bool icn2d = i2c_master_probe(bus, 0x2d, 100) == ESP_OK;
+    ESP_LOGI(TAG, "display I2C probe: touch 0x14=%d 0x5d=%d control 0x45=%d ICN6211 0x2c=%d 0x2d=%d",
+             touch14, touch5d, bridge45, icn2c, icn2d);
     if (!bridge45) {
         return;
     }
@@ -173,6 +180,122 @@ static void fill_startup_pattern(void)
                           ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE || CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+static esp_err_t icn6211_read_register(uint8_t reg, uint8_t *value)
+{
+    dsi_host_dev_t *host = &MIPI_DSI_HOST;
+    const int64_t deadline = esp_timer_get_time() + ICN_READ_TIMEOUT_US;
+
+    /* Linux's ICN6211 driver issues a two-byte generic read request:
+     * register address followed by requested response length. Do not use
+     * IDF's read helper here: it waits forever for an absent reply. */
+    while (mipi_dsi_host_ll_gen_is_cmd_fifo_full(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    mipi_dsi_host_ll_gen_set_packet_header(host, 0, MIPI_DSI_DT_SET_MAXIMUM_RETURN_PKT, 0, 1);
+    while (!mipi_dsi_host_ll_gen_is_cmd_fifo_empty(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+
+    mipi_dsi_host_ll_enable_bta(host, true);
+    mipi_dsi_host_ll_gen_set_rx_vcid(host, 0);
+    mipi_dsi_host_ll_gen_set_packet_header(host, 0, MIPI_DSI_DT_GENERIC_READ_REQUEST_2, 1, reg);
+    while (mipi_dsi_host_ll_gen_is_read_fifo_empty(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            mipi_dsi_host_ll_enable_bta(host, false);
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    *value = (uint8_t)mipi_dsi_host_ll_gen_read_payload_fifo(host);
+    mipi_dsi_host_ll_enable_bta(host, false);
+    return ESP_OK;
+}
+#endif
+
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE
+static void icn6211_probe(void)
+{
+    /* IDs first; then inspect the bridge's current BIST, geometry, clock,
+     * lane, and configuration state without overriding its Nuvoton MCU. */
+    static const uint8_t regs[] = {
+        0x00, 0x01, 0x02, 0x03, 0x09, 0x10, 0x11, 0x1e,
+        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x27, 0x28,
+        0x29, 0x2a, 0x56, 0x69, 0x6b, 0x7a, 0x86, 0xb5, 0xb6,
+    };
+    for (size_t i = 0; i < sizeof(regs); ++i) {
+        const uint8_t reg = regs[i];
+        uint8_t value = 0;
+        esp_err_t err = icn6211_read_register(reg, &value);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "ICN6211 register 0x%02x: %s; stopping probe",
+                     reg, esp_err_to_name(err));
+            break;
+        }
+        ESP_LOGI(TAG, "ICN6211 register 0x%02x = 0x%02x", reg, value);
+    }
+    log_dsi_link("after ICN6211 read-only probe");
+}
+#endif
+
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+static esp_err_t icn6211_write_register(uint8_t reg, uint8_t value)
+{
+    dsi_host_dev_t *host = &MIPI_DSI_HOST;
+    const int64_t deadline = esp_timer_get_time() + ICN_READ_TIMEOUT_US;
+    while (mipi_dsi_host_ll_gen_is_cmd_fifo_full(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    /* Linux's ICN6211 DSI regmap sends {register, value} as a two-byte
+     * generic short write; this is not a DCS display command. */
+    mipi_dsi_host_ll_gen_set_packet_header(host, 0, MIPI_DSI_DT_GENERIC_SHORT_WRITE_2,
+                                           value, reg);
+    while (!mipi_dsi_host_ll_gen_is_cmd_fifo_empty(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t icn6211_disable_bist(void)
+{
+    const uint8_t expected_id[] = {0xc1, 0x62, 0x11};
+    for (uint8_t reg = 0; reg < sizeof(expected_id); ++reg) {
+        uint8_t value;
+        ESP_RETURN_ON_ERROR(icn6211_read_register(reg, &value), TAG, "read ICN6211 ID failed");
+        if (value != expected_id[reg]) {
+            ESP_LOGE(TAG, "unexpected ICN6211 ID byte %u: 0x%02x", reg, value);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+    uint8_t before;
+    ESP_RETURN_ON_ERROR(icn6211_read_register(0x2a, &before), TAG, "read BIST failed");
+    const uint8_t after = before & ~0x08u; /* BIST_POL_BIST_GEN */
+    ESP_LOGI(TAG, "ICN6211 BIST 0x2a: 0x%02x -> 0x%02x", before, after);
+    ESP_RETURN_ON_ERROR(icn6211_write_register(0x2a, after), TAG, "write BIST failed");
+    uint8_t verify;
+    ESP_RETURN_ON_ERROR(icn6211_read_register(0x2a, &verify), TAG, "verify BIST failed");
+    if (verify != after) {
+        ESP_LOGE(TAG, "ICN6211 BIST write did not stick: 0x%02x", verify);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    ESP_LOGI(TAG, "ICN6211 BIST enable bit confirmed clear; starting checkerboard");
+    return ESP_OK;
+}
+
+#endif
+
 void capture_dsi_preview_init(void)
 {
     waveshare_control_init();
@@ -213,6 +336,20 @@ void capture_dsi_preview_init(void)
     if (err != ESP_OK) {
         goto fail;
     }
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE
+    ESP_LOGW(TAG, "read-only ICN6211 DSI probe; no framebuffer video will start");
+    icn6211_probe();
+    return;
+#endif
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+    /* Waveshare's onboard controller was observed changing BIST_POL from
+     * 0x01 to 0x49 later in startup. Do not race its initialization. */
+    vTaskDelay(pdMS_TO_TICKS(500));
+    err = icn6211_disable_bist();
+    if (err != ESP_OK) {
+        goto fail;
+    }
+#endif
     const uint8_t dcs_zero = 0;
     err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_MADCTL, &dcs_zero, 1);
     if (err != ESP_OK) {

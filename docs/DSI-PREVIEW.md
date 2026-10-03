@@ -137,3 +137,43 @@ test, never the checkerboard. The `0x45` bridge address did not acknowledge on
 this LCD, so the generic driver sequence is **not** a fix for the 3.5-inch E.
 The normal Xbox capture build was reflashed and its local web page returned
 HTTP 200 afterward. The preview remains disabled by default.
+
+## ICN6211 register access and targeted BIST test
+
+The ICN6211 Linux driver also supports DSI generic register reads. We added
+an opt-in, standalone probe that reads registers `0x00`-`0x03` (vendor ID,
+device ID, and version) with a 100 ms timeout. Unlike ESP-IDF's read helper,
+it cannot wait forever if this panel does not answer. The probe returned
+`c1 62 11 ff`, matching Linux's ICN6211 ID check. This confirms low-power
+DSI register communication with the bridge. It does **not** confirm that the
+bridge receives valid high-speed video packets. The read-only profile is
+[`boards/funcev_dsi_probe.defaults`](../boards/funcev_dsi_probe.defaults).
+
+The read-only dump showed the expected 640x480 geometry and 48/32/80,
+3/4/13 porches already programmed by the LCD's own controller. Its BIST
+register (`0x2a`) was `0x49` during the dump, but `0x01` on the next boot
+before video startup. Bit 3 is the ICN6211's built-in test generator, so
+[`boards/funcev_dsi_bist.defaults`](../boards/funcev_dsi_bist.defaults) tests
+clearing **only** that volatile bit after checking the chip ID, then starts
+the standalone checkerboard. This avoids overwriting the board controller's
+other settings. The regular Xbox profile leaves both diagnostics off.
+
+In hardware, the targeted test read `0x01` before video (the BIST enable bit
+was already clear), wrote the same value, and verified it. The LCD still did
+not show the checkerboard. A DSI register read after starting continuous DPI
+video timed out and set a host error flag, so the diagnostic no longer tries
+to read registers while video is running. Delaying the pre-video write by
+500 ms also read `0x01`, but its verify read timed out during the controller's
+startup transition. Neither test supports a BIST-bit-only fix. The ICN6211's
+documented I2C addresses `0x2c` and `0x2d` did not acknowledge on the ESP's
+shared bus; the `0x5d` touch controller did. The bridge may be on a private
+bus behind the display's MCU.
+
+The critical missing evidence is whether the ICN6211 accepts the ESP's
+high-speed video packets after its MCU has finished setup. The read-only
+register probe verifies only low-power commands, and DMA completion verifies
+only that the ESP supplied frames to its own DSI host. Neither is a screen
+image. A supported Raspberry Pi test or a verified ESP32-P4 example for this
+exact panel would distinguish host protocol mismatch from LCD-side startup
+behavior. After these diagnostics, the normal Xbox firmware was reflashed;
+`GET http://192.168.1.169/` returned HTTP 200.

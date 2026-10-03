@@ -15,6 +15,9 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Opt-in ICN6211 DSI register probe and isolated test-pattern control for the
+  Waveshare 3.5-inch DSI LCD (E). The bridge answers low-power DSI commands,
+  but the LCD still does not show the framebuffer; normal builds are unchanged.
 - Opt-in Function EV DSI preview experiment for a Waveshare 3.5-inch LCD.
   The ESP receives Xbox frames and sees the LCD touch controller, but the
   panel has not displayed the preview; keep it disabled by default.

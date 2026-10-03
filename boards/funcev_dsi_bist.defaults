@@ -1,0 +1,5 @@
+# Standalone checkerboard with only the ICN6211 BIST bit cleared.
+# Use only in a separate, ignored diagnostic build directory.
+CONFIG_KVM_DSI_PREVIEW=y
+CONFIG_KVM_DSI_PREVIEW_STANDALONE=y
+CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST=y

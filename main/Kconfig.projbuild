@@ -80,6 +80,25 @@ menu "ESP-KVM"
                 starting HDMI/CSI capture. This temporary test isolates DSI
                 output from capture bandwidth; browser video is unavailable.
 
+        config KVM_DSI_PREVIEW_ICN6211_PROBE
+            bool "Read-only ICN6211 DSI register probe (no video)"
+            depends on KVM_DSI_PREVIEW_STANDALONE
+            default n
+            help
+                Request the ICN6211 vendor and device ID over low-power DSI
+                generic-read packets, with bounded waits. This is an isolated
+                bring-up diagnostic: it does not initialize the bridge or
+                output video. Leave it disabled in normal firmware.
+
+        config KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+            bool "Clear ICN6211 built-in test-pattern bit for framebuffer test"
+            depends on KVM_DSI_PREVIEW_STANDALONE && !KVM_DSI_PREVIEW_ICN6211_PROBE
+            default n
+            help
+                After confirming the bridge ID, clear only bit 3 of its BIST
+                register and read it back before starting the checkerboard.
+                This register change is volatile; keep it off in normal builds.
+
         config KVM_GC9A01_SPI_HOST
             int "Round SPI LCD (GC9A01) SPI host (2 = SPI2)"
             depends on KVM_ENABLE_DISPLAY
