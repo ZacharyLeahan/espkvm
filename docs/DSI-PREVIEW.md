@@ -31,10 +31,24 @@ checkerboard nor Xbox pixels have appeared on the LCD.
 | 1 lane at 600 Mb/s, non-burst sync events, HS EoTP disabled | Different colors/arrangement of bars; **still no preview image** |
 | Xbox HDMI unplugged, then ESP reset | Bars still appeared; they are not the Xbox feed |
 
-The DSI host reports its PHY active and no persistent error bits after startup.
-The preview task updates its framebuffer, but the panel still does not show
-those pixels. The changed bars only show that the panel reacts to link-setting
-changes; they are not evidence of successful video decoding.
+The ESP host's vertical-bar generator visibly changed the bars from horizontal
+to vertical. That is evidence of a working DSI physical link, but not of the
+framebuffer path. With host bars disabled, the LCD was blank at 800 Mb/s and at
+600 Mb/s with a 20 MHz pixel clock. Starting with host bars for 500 ms and
+then switching to the framebuffer also left it blank.
+
+The DSI bridge's DMA-complete callback counted about 60 transfers per second,
+and its FIFO held data. The DSI host nevertheless reported a payload underflow
+at startup with Xbox capture active. A standalone framebuffer-only test (no
+CSI capture) removed that underflow, but the LCD still went from rainbow bars
+to blank without ever showing the checkerboard. Capture bandwidth is therefore
+not sufficient to explain the display failure. Forcing continuous high-speed
+DSI (no low-power blanking), still without CSI capture, made the rainbow bars
+blink rather than displaying the checkerboard; it was reverted.
+
+Increasing the ESP's L2 cache from 128 to 256 KiB caused the Tailscale network
+task to fail allocation, so that local configuration was reverted. The device
+was returned to its normal capture build after the standalone test.
 
 ## Basis for the settings
 
@@ -49,12 +63,16 @@ disables HS EoTP, so the last trial matches that detail too. A
 documents that this model can display test bars when its DSI panel driver
 fails to start, which is why bars cannot be treated as successful output.
 
-## Next diagnostic
+## Diagnostic switches
 
 `CONFIG_KVM_DSI_PREVIEW_HOST_PATTERN` enables the ESP's **vertical** DSI test
-bars instead of the framebuffer. This distinguishes an ESP-generated picture
-from the LCD's existing **horizontal** bars without involving the Xbox capture
-path. It is disabled by default. The visual outcome has not yet been confirmed.
+bars instead of the framebuffer. This distinguished an ESP-generated picture
+from the LCD's existing **horizontal** bars. It is disabled by default.
+
+`CONFIG_KVM_DSI_PREVIEW_STANDALONE` drives only the yellow/black checkerboard
+framebuffer and intentionally skips HDMI/CSI capture. It is also disabled by
+default; never leave it enabled in a normal KVM build. Bridge FIFO depth and
+framebuffer DMA completion counts are logged for both modes.
 
 The [Espressif board guide](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4-function-ev-board/user_guide.html)
 calls for a reverse-contact LCD ribbon. The photos appear consistent with one,
@@ -63,8 +81,34 @@ matches Waveshare's published DSI connector pinout. This still does not
 establish that high-speed DSI pairs are making reliable contact. Do not flip
 or reseat either ribbon while powered.
 
-If the ESP host pattern fails too, identify the display board's DSI bridge
+The next step is to identify the display board's DSI bridge
 initialization/reset sequence and test this exact LCD with a known-good
 Raspberry Pi before more timing guesses. The board in our photos carries an
 ICN6211 DSI-to-RGB bridge and a Nuvoton controller; another developer has
 [reported this model not working on ESP32-P4](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184).
+
+## Source-level compatibility findings
+
+Waveshare's [ESP32 display support list](https://github.com/waveshareteam/Waveshare-ESP32-components/blob/master/README.md)
+does **not** list the 3.5-inch DSI LCD (E) among tested Raspberry-adapter
+panels. The [open issue for this exact model](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184)
+describes the same failure on a different ESP32-P4 board and requests driver
+support. This does not prove that the panel cannot work on a P4, but it means
+we do not have a vendor-validated configuration to port.
+
+The manufacturer's Raspberry Pi overlay describes a **generic DSI panel**,
+not an ICN6211 bridge device. On a Pi, that path supplies timing and mode
+flags without the explicit ICN6211 register sequence found in
+[Linux's standalone ICN6211 bridge driver](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/bridge/chipone-icn6211.c).
+The LCD's onboard Nuvoton controller may initialize the bridge instead, but
+its firmware and exact startup contract are not documented by this overlay.
+Blindly copying the standalone bridge driver's register writes could conflict
+with the Waveshare board's own controller. Also, a
+[Raspberry Pi report for this exact LCD](https://github.com/raspberrypi/linux/issues/7376)
+shows that rainbow bars can persist when the generic panel driver fails,
+despite the hardware being otherwise functional.
+
+Before another flash, obtain either a confirmed ESP32-P4 example for this
+exact **3.5-inch DSI LCD (E)** or the panel's initialization requirements from
+Waveshare. A known-good Raspberry Pi test would separately establish that the
+LCD, bridge, and ribbons work with the manufacturer's supported setup.

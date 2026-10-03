@@ -23,6 +23,9 @@ bumps the patch).
   the framebuffer.
 - Add an opt-in ESP DSI-host vertical-pattern diagnostic to distinguish LCD
   controller color bars from pixels transmitted by the ESP.
+- Add opt-in standalone DSI framebuffer diagnostics and DMA/FIFO counters;
+  confirm host-generated bars reach the panel, but framebuffer video remains
+  unverified and the preview stays disabled by default.
 - Concise Xbox compatibility/recovery table distinguishing sustained game
   streaming, reboot capture recovery, and the short 720p game observation.
 - Local MJPEG soak-test utility reporting frame delivery gaps and reconnects,

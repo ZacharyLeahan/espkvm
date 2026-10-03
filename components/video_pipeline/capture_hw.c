@@ -550,6 +550,12 @@ capture_ctx_t *capture_hw_init_start(void)
     ESP_ERROR_CHECK(capture_i2c_bus_init());
     i2c_master_bus_handle_t i2c_bus = s_i2c_bus;
 
+#if CONFIG_KVM_DSI_PREVIEW_STANDALONE
+    ESP_LOGW(CAPTURE_LOG_TAG, "DSI standalone framebuffer diagnostic: CSI capture intentionally skipped");
+    capture_dsi_preview_init();
+    return NULL;
+#endif
+
     /* A missing capture card must not take the whole device down: without it the
      * KVM still serves HID, and the web UI explains what is wrong. */
     esp_err_t probe_err = kvm_bridge_detect(i2c_bus, &s_cap.bridge);

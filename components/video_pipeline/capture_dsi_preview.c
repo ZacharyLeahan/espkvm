@@ -24,6 +24,7 @@
 #include "esp_timer.h"
 #include "driver/i2c_master.h"
 #include "soc/mipi_dsi_host_struct.h"
+#include "soc/mipi_dsi_bridge_struct.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -46,6 +47,17 @@ static uint32_t s_last_h;
 static uint32_t s_frames;
 static int64_t s_report_us;
 static bool s_link_logged;
+static volatile uint32_t s_dma_frames;
+
+static bool on_dsi_frame_complete(esp_lcd_panel_handle_t panel,
+                                  esp_lcd_dpi_panel_event_data_t *event_data, void *user_ctx)
+{
+    (void)panel;
+    (void)event_data;
+    (void)user_ctx;
+    ++s_dma_frames;
+    return false;
+}
 
 static void log_dsi_link(const char *phase)
 {
@@ -57,6 +69,14 @@ static void log_dsi_link(const char *phase)
              (unsigned long)MIPI_DSI_HOST.vid_mode_cfg_act.val,
              (unsigned long)MIPI_DSI_HOST.int_st0.val,
              (unsigned long)MIPI_DSI_HOST.int_st1.val);
+    ESP_LOGI(TAG, "DSI bridge %s: en=0x%08lx misc=0x%08lx fifo=%lu raw=0x%08lx int=0x%08lx dma_frames=%lu fb=%p",
+             phase,
+             (unsigned long)MIPI_DSI_BRIDGE.en.val,
+             (unsigned long)MIPI_DSI_BRIDGE.dpi_misc_config.val,
+             (unsigned long)MIPI_DSI_BRIDGE.fifo_flow_status.raw_buf_depth,
+             (unsigned long)MIPI_DSI_BRIDGE.int_raw.val,
+             (unsigned long)MIPI_DSI_BRIDGE.int_st.val,
+             (unsigned long)s_dma_frames, s_fb);
 }
 
 static void preview_cleanup(void)
@@ -159,7 +179,6 @@ void capture_dsi_preview_init(void)
     const esp_lcd_dsi_bus_config_t bus_cfg = {
         .bus_id = 0,
         .num_data_lanes = 1,
-        /* 24 MHz RGB888 over one lane is nominally 576 Mb/s. */
         .lane_bit_rate_mbps = 600,
     };
     err = esp_lcd_new_dsi_bus(&bus_cfg, &s_bus);
@@ -197,6 +216,13 @@ void capture_dsi_preview_init(void)
         goto fail;
     }
     fill_startup_pattern();
+    const esp_lcd_dpi_panel_event_callbacks_t callbacks = {
+        .on_frame_buf_complete = on_dsi_frame_complete,
+    };
+    err = esp_lcd_dpi_panel_register_event_callbacks(s_panel, &callbacks, NULL);
+    if (err != ESP_OK) {
+        goto fail;
+    }
     /* The Waveshare DT overlay requests plain MIPI_DSI_MODE_VIDEO (non-burst).
      * IDF currently hardcodes burst video and per-frame BTA acknowledgements
      * for all DPI panels; this generic bridge has no DSI command response.

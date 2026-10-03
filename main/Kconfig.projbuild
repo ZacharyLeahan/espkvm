@@ -71,6 +71,15 @@ menu "ESP-KVM"
                 if the LCD still shows horizontal bars, its pixels are not
                 coming from the ESP DSI host. Never enable in normal builds.
 
+        config KVM_DSI_PREVIEW_STANDALONE
+            bool "DSI framebuffer diagnostic without CSI capture"
+            depends on KVM_DSI_PREVIEW
+            default n
+            help
+                Bring up the display's checkerboard framebuffer without
+                starting HDMI/CSI capture. This temporary test isolates DSI
+                output from capture bandwidth; browser video is unavailable.
+
         config KVM_GC9A01_SPI_HOST
             int "Round SPI LCD (GC9A01) SPI host (2 = SPI2)"
             depends on KVM_ENABLE_DISPLAY
