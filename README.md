@@ -9,6 +9,7 @@ This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/e
 - Three framebuffers and packed CPU scaling improve the measured 720p preview from about 20 to 28-29 updates/sec. Hardware PPA scaling stays disabled because it produced visible tearing.
 - The extra buffer uses 900 KiB of PSRAM, leaving about 0.5 MB free in our test. This is a measured tradeoff for this setup, not a universal maximum-performance claim.
 - With no remote viewer, resources favor the LCD. Connecting a KVM viewer prioritizes network video and reduces the LCD to **at most 1 fps**; disconnecting restores local performance automatically.
+- A local-only developer strip shows capture freshness, HDMI mode/Hz, LCD updates/sec, and stream-consumer count/priority. Signal loss or stale capture shows a black status slate. Disable `KVM_DSI_STATUS_STRIP` for a clean LCD; browser video stays overlay-free.
 - The **Waveshare 3.5-inch DSI LCD (E)** is not listed as supported/tested by Waveshare's ESP32 driver. We got live HDMI working in this fork and shared our findings on [Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430). This is a community implementation, not official vendor support or a confirmed upstream fix.
 - Touch input and the touchscreen Xbox-controller overlay are **not implemented**. Extended soak testing and repeated resolution changes with the new three-buffer profile remain to be done.
 

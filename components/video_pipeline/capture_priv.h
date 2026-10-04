@@ -23,6 +23,7 @@
  * the browser codec or its frame store. Stubs keep non-DSI boards unchanged. */
 void capture_dsi_preview_init(void);
 bool capture_dsi_preview_due(void);
+void capture_dsi_preview_tick(uint32_t completed);
 void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
                                const capture_pixfmt_t *fmt);
 

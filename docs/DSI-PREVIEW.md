@@ -41,6 +41,36 @@ those writes alone fixed it. This standalone profile disables CSI capture.
 
 ## Recommended build
 
+### Developer status strip
+
+`CONFIG_KVM_DSI_STATUS_STRIP` defaults on when LCD preview is enabled. The
+20-pixel top strip reads, for example, `LIVE 720p60Hz LCD 28.5 V:0 LOCAL`.
+It sits in the 720p letterbox; full-height content loses the top 20 pixels to
+the opaque strip. Disable the option in menuconfig for a clean local picture.
+Browser video, recordings, and screenshots are untouched.
+
+- `LIVE` means the capture task observed advancing CSI completion counters
+  within two seconds, not that the game is animating or responding to input.
+- `STALE` means no recent completion (or none observed yet); `NO SIGNAL`
+  means the HDMI bridge reports no lock. Unsupported input takes precedence
+  over stale capture when the bridge reports a bandwidth limit.
+- `LCD` measures successful live-frame submissions, not panel refresh, game
+  FPS, or unique presented frames. HDMI Hz is the separate source rate.
+- `V` is the existing frame-store consumer count: streams and other consumers
+  can contribute. It is not a count of authenticated users or distinct people.
+- `REMOTE` identifies remote-priority scheduling, not a person's identity.
+
+Text/rate sampling runs approximately once per second; composition uses the
+retired LCD buffer. During signal loss or stalled capture, the capture task
+submits a black status slate instead of leaving an unlabelled frozen game.
+Its normal two-second frame wait and recovery work can delay status updates;
+this is not an independent watchdog for a hung capture task. State, mode, and
+consumer changes appear in the existing timestamped system log, accessible
+through the existing browser/API log facilities. No REST schema is changed.
+A dedicated structured event-history API and client names are future work.
+
+### Build commands
+
 Use `boards/funcev_dsi_live.defaults`. Use a fresh build directory/configuration
 so an older standalone setting does not override these defaults:
 

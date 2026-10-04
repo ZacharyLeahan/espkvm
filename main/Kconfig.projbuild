@@ -61,6 +61,14 @@ menu "ESP-KVM"
                 with measured copy-duty and thermal limits. A standalone framebuffer
                 has been verified; live capture remains experimental.
 
+        config KVM_DSI_STATUS_STRIP
+            bool "Local LCD developer status strip"
+            depends on KVM_DSI_PREVIEW
+            default y
+            help
+                Show capture freshness, HDMI mode, LCD update rate and frame
+                consumers on the local LCD only. No browser pixels are changed.
+
         config KVM_DSI_PREVIEW_BUFFERS
             int "LCD framebuffers (3 is an experimental memory/speed tradeoff)"
             depends on KVM_DSI_PREVIEW

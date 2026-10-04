@@ -14,9 +14,11 @@
 #include "capture_priv.h"
 #include "capture.h"
 #include "lcd_rgb_half.h"
+#include "lcd_status_strip.h"
 #include "kvm_thermal.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include "esp_cache.h"
 #include "esp_check.h"
@@ -73,6 +75,86 @@ static int64_t s_report_us;
 static bool s_link_logged;
 static volatile uint32_t s_dma_frames;
 static volatile int s_dma_core = -1;
+#if CONFIG_KVM_DSI_STATUS_STRIP
+static char s_strip[80];
+static uint32_t s_seen_completed;
+static int64_t s_fresh_us;
+static int64_t s_strip_us;
+static int64_t s_idle_us;
+static uint32_t s_lcd_updates;
+static unsigned s_lcd_fps10;
+#endif
+
+static bool submit_preview(void)
+{
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "frame submit failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    /* Same-core completion finishes before task execution resumes. Across
+     * cores allow another completion to cover an ISR already in flight. */
+    s_reuse_after[s_submitted_index] = s_dma_frames + (s_dma_core == xPortGetCoreID() ? 1u : 2u);
+    s_submitted_index = s_draw_index;
+    s_draw_index = (s_draw_index + 1u) % LCD_BUFFERS;
+    s_fb = s_buffers[s_draw_index];
+    return true;
+}
+
+/* Called only by the capture task, even when no frame arrives. Do not use
+ * unchanged-image deduplication as a freshness signal: menus can be static. */
+void capture_dsi_preview_tick(uint32_t completed)
+{
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    if (!s_fb) return;
+    const int64_t now = esp_timer_get_time();
+    if (completed != s_seen_completed) {
+        s_seen_completed = completed;
+        s_fresh_us = now;
+    }
+    kvm_video_status_t status;
+    capture_status_get(&status);
+    const char *state = lcd_status_state(status.signal, status.too_fast,
+                                        s_fresh_us ? now - s_fresh_us : -1);
+    const int viewers = video_frame_viewer_count();
+    static uint32_t last_w, last_h;
+    static uint8_t last_hz;
+    static bool last_interlaced;
+    static int last_viewers = -1;
+    static const char *last_state;
+    const bool changed = !last_state || strcmp(state, last_state) || viewers != last_viewers ||
+        status.hres != last_w || status.vres != last_h || status.input_hz != last_hz ||
+        status.interlaced != last_interlaced;
+    if (!s_strip_us || now - s_strip_us >= 1000000 || changed) {
+        if (s_strip_us && now - s_strip_us >= 1000000) {
+            s_lcd_fps10 = (unsigned)((uint64_t)s_lcd_updates * 10000000 / (now - s_strip_us));
+            s_lcd_updates = 0;
+            s_strip_us = now;
+        } else if (!s_strip_us) s_strip_us = now;
+        snprintf(s_strip, sizeof(s_strip), "%s %lu%c%uHz LCD %u.%u V:%d %s", state,
+                 (unsigned long)status.vres, status.interlaced ? 'i' : 'p', status.input_hz,
+                 s_lcd_fps10 / 10, s_lcd_fps10 % 10, viewers, viewers ? "REMOTE" : "LOCAL");
+        if (changed) {
+            ESP_LOGI(TAG, "LCD status: %s; HDMI %lux%lu", s_strip,
+                     (unsigned long)status.hres, (unsigned long)status.vres);
+            last_state = state; last_viewers = viewers;
+            last_w = status.hres; last_h = status.vres; last_hz = status.input_hz;
+            last_interlaced = status.interlaced;
+        }
+    }
+    if (strcmp(state, "LIVE") && now - s_idle_us >= 1000000 &&
+        (int32_t)(s_dma_frames - s_reuse_after[s_draw_index]) >= 0) {
+        s_idle_us = now;
+        memset(s_fb, 0, LCD_FB_BYTES);
+        lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+        /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
+        s_clear_buffer[s_draw_index] = true;
+        submit_preview();
+    }
+#else
+    (void)completed;
+#endif
+}
 
 static bool on_dsi_frame_complete(esp_lcd_panel_handle_t panel,
                                   esp_lcd_dpi_panel_event_data_t *event_data, void *user_ctx)
@@ -647,9 +729,8 @@ static bool scale_hardware(const void *src, uint32_t width, uint32_t height,
         .rgb_swap = strcmp(fmt->name, "bgr888") == 0,
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
-    /* The PPA driver invalidates its destination before DMA. No CPU reads or
-     * writes follow a successful DMA update, so the later draw_bitmap flush
-     * cannot overwrite DMA pixels with stale dirty cache lines. */
+    /* The PPA driver invalidates its destination before DMA. The status strip
+     * writes only after completion; other destination cache lines stay clean. */
     esp_err_t err = ppa_do_scale_rotate_mirror(s_scaler, &cfg);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "PPA failed (%s); using CPU scaler", esp_err_to_name(err));
@@ -714,18 +795,13 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
             source_pixel(src, width, s_source_x[dx], sy, fmt, bgr, line + dx * 3u);
         }
     }
-    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "frame submit failed: %s", esp_err_to_name(err));
-        return;
-    }
-    /* A same-core ISR completes before this task can resume, so the first
-     * completion after submission has switched away from the old buffer.
-     * Cross-core callbacks may already be in flight: allow two in that case. */
-    s_reuse_after[s_submitted_index] = s_dma_frames + (s_dma_core == xPortGetCoreID() ? 1u : 2u);
-    s_submitted_index = s_draw_index;
-    s_draw_index = (s_draw_index + 1u) % LCD_BUFFERS;
-    s_fb = s_buffers[s_draw_index];
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+#endif
+    if (!submit_preview()) return;
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    ++s_lcd_updates;
+#endif
     s_frames++;
     if (!s_link_logged && s_frames >= 5) {
         s_link_logged = true;
@@ -746,6 +822,7 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
 #else
 
 void capture_dsi_preview_init(void) {}
+void capture_dsi_preview_tick(uint32_t completed) { (void)completed; }
 bool capture_dsi_preview_due(void) { return false; }
 void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
                                const capture_pixfmt_t *fmt)

@@ -131,6 +131,7 @@ void capture_loop_run(capture_ctx_t *c)
 
     while (1) {
         esp_task_wdt_reset();
+        capture_dsi_preview_tick(c->csi_dma_done_irqs);
 #if CONFIG_KVM_TC358743_ADV_DEBUG
         /* Published FPS can be zero for a static screen. Measure the capture
          * callbacks separately, including when no browser is connected. */

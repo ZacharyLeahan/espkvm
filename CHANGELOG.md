@@ -31,6 +31,9 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Add an LCD-only developer strip with capture freshness, HDMI mode/Hz,
+  measured LCD updates/s, frame-consumer count and local/remote priority.
+  Replace stale video with a status slate, and log state/mode/viewer changes.
 - Verify live 720p Xbox input on the Waveshare 3.5-inch DSI LCD (E), fitted to
   640x360. Add an opt-in live profile capped at 5 updates/s and service the
   camera watchdog during the bounded diagnostic startup wait.
