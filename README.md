@@ -11,7 +11,7 @@ This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/e
 - With no remote viewer, resources favor the LCD. Connecting a KVM viewer prioritizes network video and reduces the LCD to **at most 1 fps**; disconnecting restores local performance automatically.
 - A local-only developer strip shows capture freshness, HDMI mode/Hz, LCD updates/sec, and stream-consumer count/priority. Signal loss or stale capture shows a black status slate. Disable `KVM_DSI_STATUS_STRIP` for a clean LCD; browser video stays overlay-free.
 - The **Waveshare 3.5-inch DSI LCD (E)** is not listed as supported/tested by Waveshare's ESP32 driver. We got live HDMI working in this fork and shared our findings on [Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430). This is a community implementation, not official vendor support or a confirmed upstream fix.
-- Tap anywhere to hide/show the local stats (GT911 touch; hardware validation pending). Picture size and letterboxing stay unchanged. The touchscreen Xbox-controller overlay is **not implemented**. Extended soak testing remains to be done.
+- Tap anywhere to hide/show the local stats (GT911 touch; confirmed working on our hardware). Picture size and letterboxing stay unchanged. The touchscreen Xbox-controller overlay is **not implemented**. Extended soak testing remains to be done.
 
 [LCD setup, timings, and test history](docs/DSI-PREVIEW.md).
 

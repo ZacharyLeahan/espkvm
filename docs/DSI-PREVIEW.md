@@ -58,7 +58,9 @@ the capture task alone changes framebuffer contents. Stats default on after
 reboot, and hiding them does not stretch/crop video. No-signal/stale warnings
 remain visible for safety. With a remote viewer, the visual change can wait
 for the next low-rate LCD update. Repeated I2C failures stop touch polling
-without stopping capture. Hardware tap validation is pending.
+without stopping capture. On 2026-10-03, the controller identified as GT911 at
+0x5d; logs recorded stats hidden then shown, and the user confirmed tapping
+works. The first steady-state 720p sample remained about 28 LCD updates/sec.
 
 Protocol reference: [Espressif GT911 driver](https://github.com/espressif/esp-bsp/blob/master/components/lcd_touch/esp_lcd_touch_gt911/esp_lcd_touch_gt911.c).
 
