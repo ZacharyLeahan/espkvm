@@ -580,7 +580,7 @@ static void icn6211_inspect_video(void)
 }
 
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
-static esp_err_t icn6211_configure_mipi_pll(void)
+static esp_err_t icn6211_configure_mipi_pll(bool verify)
 {
     /* ICN6211's configuration tool and Linux driver use 0xc1 to permit DSI
      * writes. At 576 Mb/s the PLL reference is 144 MHz. P=6, M=16, S=16
@@ -593,6 +593,7 @@ static esp_err_t icn6211_configure_mipi_pll(void)
         ESP_RETURN_ON_ERROR(icn6211_write_register(setup[i][0], setup[i][1]),
                             TAG, "MIPI PLL setup write failed");
         vTaskDelay(pdMS_TO_TICKS(10));
+        if (!verify) continue;
         uint8_t actual;
         ESP_RETURN_ON_ERROR(icn6211_read_register(setup[i][0], &actual),
                             TAG, "MIPI PLL setup readback failed");
@@ -680,15 +681,13 @@ static esp_err_t preview_start_once(unsigned attempt)
     } else {
         /* A failed BTA leaves PHY direction in receive even after a host
          * soft reset. This fresh host must not request a reply at all. */
-        ESP_LOGW(TAG, "LCD final attempt: video-only, no bridge reads or PLL writes");
+        ESP_LOGW(TAG, "LCD final attempt: write-only bridge setup, no readback");
     }
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
     mipi_dsi_host_ll_set_clock_lane_state(&MIPI_DSI_HOST, MIPI_DSI_LL_CLOCK_LANE_STATE_HS);
     vTaskDelay(pdMS_TO_TICKS(20));
-    if (bridge_readable) {
-        err = icn6211_configure_mipi_pll();
-        if (err != ESP_OK) goto fail;
-    }
+    err = icn6211_configure_mipi_pll(bridge_readable);
+    if (err != ESP_OK) goto fail;
 #endif
 #endif
     const uint8_t dcs_zero = 0;

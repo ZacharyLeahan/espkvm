@@ -85,6 +85,11 @@ ten-second windows reported 211 and 207 LCD updates; HDMI capture remained
 about 60 completions/sec at 1280x720. This confirms restored host transmission,
 not yet visible panel output or a cure for the initial HDMI hot-plug event.
 
+The user confirmed that the no-PLL fallback remained **blank**, despite the
+host-side progress. The next diagnostic restores the existing five-register
+PLL configuration sequence in the final attempt but skips register readback;
+it does not change clock values or panel geometry. Visual validation is pending.
+
 The HDMI recovery path was inspected: CSI teardown does not release the
 retained PHY LDO handle, and CSI/DSI configuration clocks use separate register
 bits. No direct LCD reset by that path was found; the initiating hot-plug fault
