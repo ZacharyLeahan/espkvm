@@ -98,6 +98,8 @@ bumps the patch).
   paths on TC358743 boards. Disabled by default; not a performance preset.
 
 ### Fixed
+- Write LCD recording-overlay colors in the panel framebuffer's B,G,R byte
+  order so the record button/indicator are red, not blue; game pixels unchanged.
 - Experimental TC358743 lane selection follows the detected input bandwidth.
   Xbox 720p-to-480p transition testing is still in progress; this is not yet a
   validated automatic-resolution baseline.

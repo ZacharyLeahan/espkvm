@@ -11,7 +11,9 @@ static inline void lcd_record_pixel(uint8_t *tile, unsigned x, unsigned y,
 {
     if (x >= LCD_REC_W || y >= LCD_REC_H) return;
     size_t p = ((size_t)y * LCD_REC_W + x) * 3;
-    tile[p] = r; tile[p + 1] = g; tile[p + 2] = b;
+    /* This DPI framebuffer displays packed RGB888 in B,G,R byte order.
+     * Convert authored UI colors here; leave captured game pixels untouched. */
+    tile[p] = b; tile[p + 1] = g; tile[p + 2] = r;
 }
 
 static inline bool lcd_record_hit(unsigned x, unsigned y, unsigned w, unsigned h)
