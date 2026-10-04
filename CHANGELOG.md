@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Make the LCD tap-to-hide toggle global: hide stats, recording controls and
+  timer together without stopping recording. Hidden controls cannot trigger;
+  the next tap reveals the overlay first.
 - Replace LCD recording text labels with a bordered record-circle/stop-square
   button, a separate red recording indicator and timer, and amber busy dots.
   Preserve the existing hit area and cached drawing to avoid per-frame work.

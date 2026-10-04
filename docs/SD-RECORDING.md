@@ -82,7 +82,10 @@ blinking red indicator and minutes:seconds timer to its left. Amber dots mean
 the requested action is still in progress, not that recording has started.
 Tap again to close
 the file and restore the prior codec/rate/bitrate. Taps elsewhere still toggle
-stats. The overlay is LCD-only and is not burned into recordings.
+the entire overlay, including the record/stop button, indicator and timer.
+Recording continues while hidden. Any tap restores the overlay; a hidden
+button cannot start or stop a recording. The overlay is LCD-only and is not
+burned into recordings.
 
 The recorder runs on a separate control task. Failed starts show an LCD
 message and restore settings; detailed reasons remain in the system log.

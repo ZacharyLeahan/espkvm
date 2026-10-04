@@ -118,12 +118,15 @@ static void touch_task(void *arg)
                 ESP_LOGI(TAG, "touch: raw %u,%u mapped %u,%u", raw_x, raw_y, x, y);
                 capture_lcd_record_state_t record;
                 capture_lcd_record_state(&record);
-                if (record.available && lcd_record_hit(x, y, LCD_W, LCD_H)) {
+                /* Hidden controls must not react: any tap first reveals the
+                 * whole overlay, without accidentally starting/stopping SD. */
+                if (atomic_load(&s_stats_visible) && record.available &&
+                    lcd_record_hit(x, y, LCD_W, LCD_H)) {
                     capture_lcd_record_toggle();
                 } else {
                     bool visible = !atomic_load(&s_stats_visible);
                     atomic_store(&s_stats_visible, visible);
-                    ESP_LOGI(TAG, "touch: LCD stats %s", visible ? "shown" : "hidden");
+                    ESP_LOGI(TAG, "touch: LCD overlay %s", visible ? "shown" : "hidden");
                 }
             }
         }
@@ -247,8 +250,8 @@ void capture_dsi_preview_tick(uint32_t completed)
         (int32_t)(s_dma_frames - s_reuse_after[s_draw_index]) >= 0) {
         s_idle_us = now;
         memset(s_fb, 0, LCD_FB_BYTES);
-        lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
-        if (s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
+        if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+        if (s_show_stats && s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
             s_record.recording, s_record.busy, s_record.seconds);
         /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
         s_clear_buffer[s_draw_index] = true;
@@ -911,7 +914,7 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     }
 #if CONFIG_KVM_DSI_STATUS_STRIP
     if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
-    if (s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
+    if (s_show_stats && s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
         s_record.recording, s_record.busy, s_record.seconds);
 #endif
     if (!submit_preview()) return;
