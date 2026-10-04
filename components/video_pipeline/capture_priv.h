@@ -50,8 +50,13 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
  * every resolution change would fragment PSRAM and can fail exactly when a
  * machine switches from its BIOS mode to the desktop.
  */
+#if CONFIG_KVM_CAPTURE_720P_MAX
+#define CAPTURE_MAX_H_RES 1280u
+#define CAPTURE_MAX_V_RES 720u
+#else
 #define CAPTURE_MAX_H_RES 1920u
 #define CAPTURE_MAX_V_RES 1080u
+#endif
 #if CAPTURE_DIRECT_ENCODE
 /* On the direct-encode board the encoder reads the frame at macroblock-aligned
  * height, so pad the allocation up to the next multiple of 16 rows (1080 -> 1088).

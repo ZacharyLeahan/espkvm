@@ -391,6 +391,10 @@ static unsigned capture_csi_lanes_for_mode(uint32_t hres, uint32_t vres, uint32_
 
 static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
 {
+    /* Also guard initial boot, which does not pass through apply_mode(). */
+    ESP_RETURN_ON_FALSE(hres >= 320u && vres >= 200u && hres <= CAPTURE_MAX_H_RES &&
+                        vres <= CAPTURE_MAX_V_RES, ESP_ERR_INVALID_ARG,
+                        CAPTURE_LOG_TAG, "input exceeds capture allocation: %ux%u", hres, vres);
 #if CONFIG_KVM_CAPTURE_DEBUG_RGB
     const unsigned lanes = 2u;
 #else
