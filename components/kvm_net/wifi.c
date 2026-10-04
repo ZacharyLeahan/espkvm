@@ -546,6 +546,10 @@ esp_err_t kvm_wifi_init(void)
     const int32_t m = kvm_setting_int("net_mode");
     s_mode = (m == KVM_NET_WIFI_AP) ? KVM_NET_WIFI_AP : KVM_NET_WIFI_STA;
 
+    /* HTTP startup still needs lwIP if the optional C6 fails to answer. */
+    (void)esp_netif_init();
+    (void)esp_event_loop_create_default();
+
     if (coproc_wifi_up() != ESP_OK) {
         return ESP_OK; /* WiFi is optional; the warning is already logged */
     }
