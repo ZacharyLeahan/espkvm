@@ -75,9 +75,12 @@ explicitly resamples to 25 fps rather than claiming all HDMI frames were saved.
 
 ## Experimental LCD Record/Stop control
 
-The status-strip build now includes a persistent top-right `REC` touch target.
-Tap it to select H.264, a 30-fps target, and 4,000 kbit/s, then record to the
-card. It changes to `STOP` with a minutes:seconds timer. Tap again to close
+The status-strip build includes a persistent top-right button with a red
+record circle. Tap it to select H.264, a 30-fps target, and 4,000 kbit/s, then
+record to the card. It becomes a white stop square, with a separate gently
+blinking red indicator and minutes:seconds timer to its left. Amber dots mean
+the requested action is still in progress, not that recording has started.
+Tap again to close
 the file and restore the prior codec/rate/bitrate. Taps elsewhere still toggle
 stats. The overlay is LCD-only and is not burned into recordings.
 

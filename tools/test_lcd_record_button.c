@@ -16,8 +16,15 @@ int main(void)
     assert(buf);
     memset(buf, 0x5a, size);
     lcd_record_button(buf, 640, 480, false, false, 0);
+    size_t icon = (22 * 640 + 480 + 137) * 3;
+    assert(buf[icon] == 245 && buf[icon + 1] == 45);
+    size_t dot = (22 * 640 + 480 + 10) * 3;
+    assert(buf[dot] == 0);
     lcd_record_button(buf, 640, 480, true, false, 3661);
+    assert(buf[icon] == 245 && buf[icon + 1] == 245);
+    assert(buf[dot] == 180);
     lcd_record_button(buf, 640, 480, true, true, UINT32_MAX);
+    assert(buf[icon] == 255 && buf[icon + 1] == 190);
     for (unsigned y = 0; y < 480; ++y)
         for (unsigned x = 0; x < 640; ++x)
             if (!lcd_record_hit(x, y, 640, 480))

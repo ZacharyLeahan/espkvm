@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Replace LCD recording text labels with a bordered record-circle/stop-square
+  button, a separate red recording indicator and timer, and amber busy dots.
+  Preserve the existing hit area and cached drawing to avoid per-frame work.
 - Initialize networking before optional C6 startup, reserve Function EV GPIO 6,
   and disable station modem sleep for interactive video. Adapt upstream fixes
   separately; Wi-Fi PSRAM allocation and Microlink changes remain pending.
