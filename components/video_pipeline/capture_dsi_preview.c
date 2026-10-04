@@ -16,10 +16,12 @@
 #include "lcd_rgb_half.h"
 #include "lcd_rgb_9to8.h"
 #include "lcd_status_strip.h"
+#include "lcd_touch_toggle.h"
 #include "kvm_thermal.h"
 
 #include <string.h>
 #include <stdio.h>
+#include <stdatomic.h>
 
 #include "esp_cache.h"
 #include "esp_check.h"
@@ -84,6 +86,69 @@ static int64_t s_strip_us;
 static int64_t s_idle_us;
 static uint32_t s_lcd_updates;
 static unsigned s_lcd_fps10;
+static atomic_bool s_stats_visible = true;
+static bool s_show_stats = true;
+static i2c_master_dev_handle_t s_touch;
+
+/* GT911 protocol: Espressif esp-bsp/components/lcd_touch/esp_lcd_touch_gt911.
+ * Preserve the panel MCU's reset/configuration; we need only contact presence. */
+static void touch_task(void *arg)
+{
+    (void)arg;
+    lcd_touch_toggle_t gesture = {0};
+    unsigned errors = 0;
+    for (;;) {
+        const uint8_t reg[] = {0x81, 0x4e};
+        uint8_t report[41];
+        esp_err_t err = i2c_master_transmit_receive(s_touch, reg, sizeof(reg),
+                                                  report, sizeof(report), 20);
+        if (err == ESP_OK && (report[0] & 0x80)) {
+            const uint8_t ack[] = {0x81, 0x4e, 0};
+            err = i2c_master_transmit(s_touch, ack, sizeof(ack), 20);
+            if (err == ESP_OK && lcd_touch_toggle_event(&gesture, report[0], esp_timer_get_time())) {
+                bool visible = !atomic_load(&s_stats_visible);
+                atomic_store(&s_stats_visible, visible);
+                ESP_LOGI(TAG, "touch: LCD stats %s", visible ? "shown" : "hidden");
+            }
+        }
+        if (err != ESP_OK) {
+            if (++errors == 10) {
+                ESP_LOGW(TAG, "touch polling stopped after repeated I2C errors; video continues");
+                vTaskDelete(NULL);
+                return;
+            }
+        } else errors = 0;
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
+
+static void touch_init(void)
+{
+    i2c_master_bus_handle_t bus = capture_i2c_bus();
+    if (!bus) return;
+    const uint8_t addresses[] = {0x5d, 0x14};
+    for (unsigned i = 0; i < sizeof(addresses); ++i) {
+        if (i2c_master_probe(bus, addresses[i], 20) != ESP_OK) continue;
+        const i2c_device_config_t cfg = {.dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = addresses[i], .scl_speed_hz = 100000};
+        if (i2c_master_bus_add_device(bus, &cfg, &s_touch) != ESP_OK) continue;
+        const uint8_t reg[] = {0x81, 0x40};
+        uint8_t id[4] = {0};
+        esp_err_t err = i2c_master_transmit_receive(s_touch, reg, sizeof(reg), id, sizeof(id), 20);
+        if (err == ESP_OK && !memcmp(id, "911", 3)) {
+            if (xTaskCreate(touch_task, "lcd_touch", 3072, NULL, 2, NULL) == pdPASS) {
+                ESP_LOGI(TAG, "GT911 touch ready at 0x%02x: tap to toggle stats", addresses[i]);
+                return;
+            }
+            ESP_LOGW(TAG, "touch task allocation failed; video continues");
+        } else {
+            ESP_LOGW(TAG, "unrecognized touch ID at 0x%02x: %02x %02x %02x %02x",
+                     addresses[i], id[0], id[1], id[2], id[3]);
+        }
+        i2c_master_bus_rm_device(s_touch);
+        s_touch = NULL;
+    }
+}
 #endif
 
 static bool submit_preview(void)
@@ -108,6 +173,12 @@ void capture_dsi_preview_tick(uint32_t completed)
 {
 #if CONFIG_KVM_DSI_STATUS_STRIP
     if (!s_fb) return;
+    const bool show = atomic_load(&s_stats_visible);
+    if (show != s_show_stats) {
+        s_show_stats = show;
+        /* Erase the previous glyphs in ALL ring buffers, including letterbox. */
+        for (unsigned i = 0; i < LCD_BUFFERS; ++i) s_clear_buffer[i] = true;
+    }
     const int64_t now = esp_timer_get_time();
     if (completed != s_seen_completed) {
         s_seen_completed = completed;
@@ -635,6 +706,9 @@ void capture_dsi_preview_init(void)
     /* Framebuffer zero is on screen; prepare the first live frame in one. */
     s_draw_index = 1;
     s_fb = s_buffers[s_draw_index];
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    touch_init();
+#endif
     return;
 
 fail:
@@ -802,7 +876,7 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
         }
     }
 #if CONFIG_KVM_DSI_STATUS_STRIP
-    lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+    if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
 #endif
     if (!submit_preview()) return;
 #if CONFIG_KVM_DSI_STATUS_STRIP

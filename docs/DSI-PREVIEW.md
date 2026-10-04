@@ -24,7 +24,8 @@ Tailscale, and repeated mode-change testing of this memory tradeoff remain open.
 This is **community support in this fork**, not official Waveshare support. The user
 confirmed both the standalone yellow/black checkerboard and then the live
 Xbox image on the physical LCD. Keep `CONFIG_KVM_DSI_PREVIEW`
-disabled on builds without this LCD. No touchscreen controls are implemented.
+disabled on builds without this LCD. Touch currently only toggles the stats;
+Xbox controller buttons are not implemented.
 
 We shared the working startup settings on
 [Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430).
@@ -48,6 +49,18 @@ those writes alone fixed it. This standalone profile disables CSI capture.
 It sits in the 720p letterbox; full-height content loses the top 20 pixels to
 the opaque strip. Disable the option in menuconfig for a clean local picture.
 Browser video, recordings, and screenshots are untouched.
+
+Tap anywhere to toggle the strip; hold/drag does not repeat. GT911 product ID
+is checked before polling at 0x5d (or 0x14). Only ready contact reports are
+acknowledged; no-data packets are not releases. The panel's existing reset and
+configuration are preserved. A low-priority task polls independently of video;
+the capture task alone changes framebuffer contents. Stats default on after
+reboot, and hiding them does not stretch/crop video. No-signal/stale warnings
+remain visible for safety. With a remote viewer, the visual change can wait
+for the next low-rate LCD update. Repeated I2C failures stop touch polling
+without stopping capture. Hardware tap validation is pending.
+
+Protocol reference: [Espressif GT911 driver](https://github.com/espressif/esp-bsp/blob/master/components/lcd_touch/esp_lcd_touch_gt911/esp_lcd_touch_gt911.c).
 
 - `LIVE` means the capture task observed advancing CSI completion counters
   within two seconds, not that the game is animating or responding to input.
@@ -102,8 +115,9 @@ Initial hardware sample on 2026-10-03: 720x480p60 input measured 297 LCD
 updates in 10014 ms (29.7 updates/s), with about 19.9 ms frame preparation,
 versus roughly 20 updates/s and 30 ms on the general path. This includes
 the developer strip, three buffers, no remote viewers, and PPA disabled.
-Visual confirmation and a live 480p-to-720p transition test are still pending
-for this build; the existing 2:1 scaler's reference test continues to pass.
+Later samples reached 300 updates per 10009 ms. The user confirmed smooth
+480p gameplay and then smooth 720p after switching back, validating automatic
+path selection on this setup. The 2:1 scaler's reference test also passes.
 
 The 9:8 path is tested against the reference for output lengths 0-640,
 randomized pixels, tails, and unaligned buffers with ASan/UBSan:

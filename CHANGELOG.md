@@ -34,6 +34,9 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Add GT911 tap-to-toggle for local LCD stats, with press/release latching,
+  debounce and bounded I2C polling. Video geometry is unchanged; signal-loss
+  warnings remain visible. Touch does not send Xbox controller input.
 - Add an LCD-only developer strip with capture freshness, HDMI mode/Hz,
   measured LCD updates/s, frame-consumer count and local/remote priority.
   Replace stale video with a status slate, and log state/mode/viewer changes.

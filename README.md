@@ -11,7 +11,7 @@ This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/e
 - With no remote viewer, resources favor the LCD. Connecting a KVM viewer prioritizes network video and reduces the LCD to **at most 1 fps**; disconnecting restores local performance automatically.
 - A local-only developer strip shows capture freshness, HDMI mode/Hz, LCD updates/sec, and stream-consumer count/priority. Signal loss or stale capture shows a black status slate. Disable `KVM_DSI_STATUS_STRIP` for a clean LCD; browser video stays overlay-free.
 - The **Waveshare 3.5-inch DSI LCD (E)** is not listed as supported/tested by Waveshare's ESP32 driver. We got live HDMI working in this fork and shared our findings on [Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430). This is a community implementation, not official vendor support or a confirmed upstream fix.
-- Touch input and the touchscreen Xbox-controller overlay are **not implemented**. Extended soak testing and repeated resolution changes with the new three-buffer profile remain to be done.
+- Tap anywhere to hide/show the local stats (GT911 touch; hardware validation pending). Picture size and letterboxing stay unchanged. The touchscreen Xbox-controller overlay is **not implemented**. Extended soak testing remains to be done.
 
 [LCD setup, timings, and test history](docs/DSI-PREVIEW.md).
 
@@ -44,7 +44,7 @@ These are observations, not blanket compatibility guarantees. Zero reconnects do
 | Espressif ESP32-P4 Function EV board (ordered as P4X-Function-EV; P4 rev 3.2, C6 Wi-Fi) | Runs capture, LCD rendering, and the web KVM | AliExpress | $95.54 |
 | Geekworm C790 HDMI-to-CSI-2 bridge (Toshiba TC358743) | Takes Xbox HDMI into the ESP's MIPI CAMERA connector | AliExpress | $85.32 |
 | **Browser-capture hardware total** | | | **$180.86** |
-| Waveshare 3.5-inch DSI LCD (E), 640×480 capacitive touch | Optional local HDMI preview via MIPI DISPLAY; touch not implemented | Amazon | $39.17 |
+| Waveshare 3.5-inch DSI LCD (E), 640×480 capacitive touch | Optional local HDMI preview via MIPI DISPLAY; tap-to-toggle stats | Amazon | $39.17 |
 | **All three purchases** | | | **$220.03** |
 
 Prices are historical order totals verified against the September 18 (AliExpress) and September 30 (Amazon) 2026 confirmation emails, not current quotes. The LCD's item price was $36.95 before the $39.17 order total. This excludes the Xbox HDMI adapter, cables, power supply, and case.
