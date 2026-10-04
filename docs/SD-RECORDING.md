@@ -105,7 +105,11 @@ LCD contained 891 decoded frames over 33.933 seconds (26.26 fps), zero
 recorder-reported drops, and no decode errors. LCD diagnostics during the
 recording were about 26-27 updates/s, returning to about 30 after stopping.
 The subsequent build caches button rasterization and labels local recording
-separately from remote viewing. Simultaneous 720p and a long soak are pending.
+separately from remote viewing. Its bounded final check saved 393 frames in
+14.982 seconds (26.23 fps), with zero recorder drops and no decode errors;
+the LCD reported 264 updates over a 10.044-second recording interval. Caching
+the button did not establish a 30-fps result. Idle settings were restored and
+recording was off at handoff. Simultaneous 720p and a long soak are pending.
 
 GT911 coordinate parsing follows the [Espressif driver](https://github.com/espressif/esp-bsp/blob/master/components/lcd_touch/esp_lcd_touch_gt911/esp_lcd_touch_gt911.c).
 The panel's existing configuration supplies the coordinate range; no touch
