@@ -8,6 +8,12 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add an experimental final LCD startup fallback when bridge readback times
+  out, preserving the verified path first and logging DSI failure registers.
+  Physical output and HDMI hot-plug recovery still require validation.
+- Disable implicit DBI command acknowledgements for the generic LCD bridge.
+  With the no-read fallback, this cleared the measured receive-direction stall
+  and restored sustained LCD DMA/render updates on the affected device.
 - Retry failed LCD startup up to three times with DSI teardown and bounded
   settling delays. An unavailable display still allows browser capture;
   this does not yet provide runtime recovery for a stalled LCD.

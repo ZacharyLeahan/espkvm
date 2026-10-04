@@ -58,6 +58,38 @@ alone does not verify the DSI data connection. Disconnect power before checking
 or reseating the display ribbon. Further hot-plug testing is pending a working
 LCD connection.
 
+Follow-up diagnostic build: attempt two uses automatic command
+clock control and sends the ICN6211 DSI configuration password before ID reads,
+following the register definition in the
+[Linux bridge driver](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/bridge/chipone-icn6211.c).
+These still timed out on the affected device (DSI error registers both zero).
+Continuing video on the same host after a read timeout stalled after one DMA
+frame with payload-write error bit 7 and PHY direction still receive. A host
+soft reset did not clear it. The final attempt now uses a fresh DSI host with
+no bridge read requests at all, without PLL programming or the paused register
+inspection. This is an experimental
+fallback relying on the panel MCU's existing configuration, not evidence that
+the panel received the video. Incorrect chip IDs still fail closed. Visual
+confirmation and HDMI unplug/replug regression testing remain required.
+
+The no-read attempt also stalled in receive. Inspection of ESP-IDF's
+`esp_lcd_new_panel_io_dbi()` found command acknowledgements enabled by default.
+The preview now explicitly disables command ACK and BTA immediately after
+creating DBI; explicit reads alone enable BTA. Disabling video-frame ACK was
+already part of the original working profile and is a separate setting.
+
+After disabling command ACK, the final no-read path changed PHY status from
+0x152b (receive direction) to 0x1529, cleared payload-write error 0x80, and
+advanced DMA completions from 5 to 25 in the first stream sample. Two following
+ten-second windows reported 211 and 207 LCD updates; HDMI capture remained
+about 60 completions/sec at 1280x720. This confirms restored host transmission,
+not yet visible panel output or a cure for the initial HDMI hot-plug event.
+
+The HDMI recovery path was inspected: CSI teardown does not release the
+retained PHY LDO handle, and CSI/DSI configuration clocks use separate register
+bits. No direct LCD reset by that path was found; the initiating hot-plug fault
+is not yet explained.
+
 ### Developer status strip
 
 `CONFIG_KVM_DSI_STATUS_STRIP` defaults on when LCD preview is enabled. The

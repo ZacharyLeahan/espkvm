@@ -607,8 +607,12 @@ static esp_err_t icn6211_configure_mipi_pll(void)
 
 #endif
 
-static esp_err_t preview_start_once(void)
+static esp_err_t preview_start_once(unsigned attempt)
 {
+    (void)attempt;
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+    bool bridge_readable = false;
+#endif
     waveshare_control_init();
     const esp_ldo_channel_config_t ldo_cfg = {
         .chan_id = 3, /* Function EV: LDO_VO3 -> VDD_MIPI_DPHY */
@@ -625,7 +629,7 @@ static esp_err_t preview_start_once(void)
         .num_data_lanes = 1,
         .lane_bit_rate_mbps = 576, /* non-burst RGB888: 24 MHz * 24 bits */
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
-        .flags.clock_lane_force_hs = true,
+        .flags.clock_lane_force_hs = attempt == 1,
 #endif
     };
     err = esp_lcd_new_dsi_bus(&bus_cfg, &s_bus);
@@ -650,20 +654,40 @@ static esp_err_t preview_start_once(void)
     if (err != ESP_OK) {
         goto fail;
     }
+    /* IDF's DBI constructor requests an ACK for every write. This generic
+     * video bridge must not be left awaiting an unsolicited write reply.
+     * Explicit register reads below manage BTA themselves. */
+    mipi_dsi_host_ll_enable_cmd_ack(&MIPI_DSI_HOST, false);
+    mipi_dsi_host_ll_enable_bta(&MIPI_DSI_HOST, false);
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE
     ESP_LOGW(TAG, "read-only ICN6211 DSI probe; no framebuffer video will start");
     icn6211_probe();
     return ESP_OK;
 #endif
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
-    err = icn6211_disable_bist();
-    if (err != ESP_OK) {
-        goto fail;
+    if (attempt == 2) {
+        /* A warm panel can retain its command-interface selection. Restore
+         * DSI access before demanding an ID reply, using the ICN6211's
+         * documented configuration password (Linux chipone-icn6211). */
+        err = icn6211_write_register(0x7a, 0xc1);
+        if (err != ESP_OK) goto fail;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (attempt < 3) {
+        err = icn6211_disable_bist();
+        if (err != ESP_OK) goto fail;
+        bridge_readable = true;
+    } else {
+        /* A failed BTA leaves PHY direction in receive even after a host
+         * soft reset. This fresh host must not request a reply at all. */
+        ESP_LOGW(TAG, "LCD final attempt: video-only, no bridge reads or PLL writes");
     }
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
-    err = icn6211_configure_mipi_pll();
-    if (err != ESP_OK) {
-        goto fail;
+    mipi_dsi_host_ll_set_clock_lane_state(&MIPI_DSI_HOST, MIPI_DSI_LL_CLOCK_LANE_STATE_HS);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    if (bridge_readable) {
+        err = icn6211_configure_mipi_pll();
+        if (err != ESP_OK) goto fail;
     }
 #endif
 #endif
@@ -748,7 +772,7 @@ static esp_err_t preview_start_once(void)
     log_dsi_link("startup");
     ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, viewer-aware budget");
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
-    icn6211_inspect_video();
+    if (bridge_readable) icn6211_inspect_video();
 #endif
     /* Framebuffer zero is on screen; prepare the first live frame in one. */
     s_draw_index = 1;
@@ -759,6 +783,7 @@ static esp_err_t preview_start_once(void)
     return ESP_OK;
 
 fail:
+    if (s_bus) log_dsi_link("startup failure");
     preview_cleanup();
     return err;
 }
@@ -776,12 +801,13 @@ void capture_dsi_preview_init(void)
             esp_task_wdt_reset();
         }
         ESP_LOGI(TAG, "LCD startup attempt %u/3", attempt);
-        esp_err_t err = preview_start_once();
+        esp_err_t err = preview_start_once(attempt);
         if (err == ESP_OK) {
             return;
         }
         ESP_LOGW(TAG, "LCD startup attempt %u/3 failed: %s", attempt,
                  esp_err_to_name(err));
+        if (err == ESP_ERR_INVALID_RESPONSE) break;
         if (attempt < 3) {
             /* Give the panel MCU time to settle without starving the watched
              * capture task. No power cycling of the shared CSI/DSI PHY LDO. */
