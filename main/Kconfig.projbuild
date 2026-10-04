@@ -61,6 +61,16 @@ menu "ESP-KVM"
                 with measured copy-duty and thermal limits. A standalone framebuffer
                 has been verified; live capture remains experimental.
 
+        config KVM_DSI_PREVIEW_BUFFERS
+            int "LCD framebuffers (3 is an experimental memory/speed tradeoff)"
+            depends on KVM_DSI_PREVIEW
+            range 2 3
+            default 2
+            help
+                A third buffer lets rendering overlap display handoff, but
+                consumes another 921600 bytes of PSRAM. Keep two unless the
+                additional buffer improves measured performance safely.
+
         config KVM_DSI_PREVIEW_PPA
             bool "Experimental hardware scaler for exact RGB LCD ratios"
             depends on KVM_DSI_PREVIEW

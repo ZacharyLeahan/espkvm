@@ -43,6 +43,7 @@
 #define LCD_W 640u
 #define LCD_H 480u
 #define LCD_FB_BYTES (LCD_W * LCD_H * 3u)
+#define LCD_BUFFERS CONFIG_KVM_DSI_PREVIEW_BUFFERS
 #define PREVIEW_LOCAL_FPS 60
 #define PREVIEW_REMOTE_FPS 1
 #define ICN_READ_TIMEOUT_US 100000
@@ -53,10 +54,11 @@ static esp_lcd_dsi_bus_handle_t s_bus;
 static esp_lcd_panel_io_handle_t s_dbi_io;
 static esp_lcd_panel_handle_t s_panel;
 static uint8_t *s_fb;
-static uint8_t *s_buffers[2];
+static uint8_t *s_buffers[LCD_BUFFERS];
 static unsigned s_draw_index;
-static bool s_clear_buffer[2] = {true, true};
-static uint32_t s_reuse_after;
+static unsigned s_submitted_index;
+static bool s_clear_buffer[LCD_BUFFERS];
+static uint32_t s_reuse_after[LCD_BUFFERS];
 static int64_t s_last_frame_us;
 static int64_t s_last_cost_us;
 static bool s_last_fast_path;
@@ -489,7 +491,7 @@ void capture_dsi_preview_init(void)
         .dpi_clock_freq_mhz = 24,
         .in_color_format = LCD_COLOR_FMT_RGB888,
         .out_color_format = LCD_COLOR_FMT_RGB888,
-        .num_fbs = 2,
+        .num_fbs = LCD_BUFFERS,
         .video_timing = {
             .h_size = LCD_W,
             .v_size = LCD_H,
@@ -505,8 +507,13 @@ void capture_dsi_preview_init(void)
     if (err != ESP_OK) {
         goto fail;
     }
-    err = esp_lcd_dpi_panel_get_frame_buffer(s_panel, 2,
+    err = esp_lcd_dpi_panel_get_frame_buffer(s_panel, LCD_BUFFERS,
+#if LCD_BUFFERS == 3
+                                            (void **)&s_buffers[0], (void **)&s_buffers[1],
+                                            (void **)&s_buffers[2]);
+#else
                                             (void **)&s_buffers[0], (void **)&s_buffers[1]);
+#endif
     s_fb = s_buffers[0];
     if (err != ESP_OK || !s_fb) {
         goto fail;
@@ -557,7 +564,7 @@ bool capture_dsi_preview_due(void)
 {
     const bool remote = video_frame_viewer_count() > 0;
     const int fps = kvm_thermal_fps_limit(remote ? PREVIEW_REMOTE_FPS : PREVIEW_LOCAL_FPS);
-    if (!s_fb || fps <= 0 || (int32_t)(s_dma_frames - s_reuse_after) < 0) {
+    if (!s_fb || fps <= 0 || (int32_t)(s_dma_frames - s_reuse_after[s_draw_index]) < 0) {
         return false;
     }
     if (s_last_priority != (int)remote) {
@@ -675,7 +682,9 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     const uint32_t x0 = (LCD_W - out_w) / 2u;
     const uint32_t y0 = (LCD_H - out_h) / 2u;
     if (width != s_last_w || height != s_last_h) {
-        s_clear_buffer[0] = s_clear_buffer[1] = true;
+        for (unsigned i = 0; i < LCD_BUFFERS; ++i) {
+            s_clear_buffer[i] = true;
+        }
         s_last_w = width;
         s_last_h = height;
         for (uint32_t dx = 0; dx < out_w; ++dx) {
@@ -713,8 +722,9 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     /* A same-core ISR completes before this task can resume, so the first
      * completion after submission has switched away from the old buffer.
      * Cross-core callbacks may already be in flight: allow two in that case. */
-    s_reuse_after = s_dma_frames + (s_dma_core == xPortGetCoreID() ? 1u : 2u);
-    s_draw_index ^= 1u;
+    s_reuse_after[s_submitted_index] = s_dma_frames + (s_dma_core == xPortGetCoreID() ? 1u : 2u);
+    s_submitted_index = s_draw_index;
+    s_draw_index = (s_draw_index + 1u) % LCD_BUFFERS;
     s_fb = s_buffers[s_draw_index];
     s_frames++;
     if (!s_link_logged && s_frames >= 5) {
@@ -725,9 +735,9 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     s_last_cost_us = now - s_last_frame_us;
     s_last_fast_path = accelerated || packed_half;
     if (now - s_report_us >= 10000000) {
-        ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us (%s)", (unsigned long)s_frames,
+        ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us (%s, %u buffers)", (unsigned long)s_frames,
                  (unsigned long)((now - s_report_us) / 1000), (unsigned long)s_last_cost_us,
-                 accelerated ? "PPA" : (packed_half ? "CPU packed" : "CPU"));
+                 accelerated ? "PPA" : (packed_half ? "CPU packed" : "CPU"), LCD_BUFFERS);
         s_frames = 0;
         s_report_us = now;
     }
