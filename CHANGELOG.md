@@ -37,6 +37,8 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Document the first microSD recording trial: LCD-disabled 480p H.264 clips,
+  measured delivery rates, memory limits, and a host-side GIF workflow.
 - Clarify the real-Xbox homebrew testing goal, current observation capabilities,
   and planned controller/CLI/agent milestones without implying they exist yet.
 - Add a read-only Xbox observation collector with timestamped status/events,
