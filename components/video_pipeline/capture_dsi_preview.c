@@ -14,6 +14,7 @@
 #include "capture_priv.h"
 #include "capture.h"
 #include "lcd_rgb_half.h"
+#include "lcd_rgb_9to8.h"
 #include "lcd_status_strip.h"
 #include "kvm_thermal.h"
 
@@ -784,11 +785,16 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     const bool accelerated = scale_hardware(src, width, height, out_w, out_h, x0, y0, fmt);
     const bool bgr = strcmp(fmt->name, "bgr888") == 0;
     const bool packed_half = fmt->bpp == 24 && !bgr && width == out_w * 2u;
+    const bool packed_9to8 = fmt->bpp == 24 && !bgr && width * 8u == out_w * 9u;
     for (uint32_t dy = 0; !accelerated && dy < out_h; ++dy) {
         const uint32_t sy = (uint32_t)((uint64_t)dy * height / out_h);
         uint8_t *line = s_fb + ((size_t)(dy + y0) * LCD_W + x0) * 3u;
         if (packed_half) {
             lcd_rgb_half_line((const uint8_t *)src + (size_t)sy * width * 3u, line, out_w);
+            continue;
+        }
+        if (packed_9to8) {
+            lcd_rgb_9to8_line((const uint8_t *)src + (size_t)sy * width * 3u, line, out_w);
             continue;
         }
         for (uint32_t dx = 0; dx < out_w; ++dx) {
@@ -809,11 +815,12 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     }
     const int64_t now = esp_timer_get_time();
     s_last_cost_us = now - s_last_frame_us;
-    s_last_fast_path = accelerated || packed_half;
+    s_last_fast_path = accelerated || packed_half || packed_9to8;
     if (now - s_report_us >= 10000000) {
         ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us (%s, %u buffers)", (unsigned long)s_frames,
                  (unsigned long)((now - s_report_us) / 1000), (unsigned long)s_last_cost_us,
-                 accelerated ? "PPA" : (packed_half ? "CPU packed" : "CPU"), LCD_BUFFERS);
+                 accelerated ? "PPA" : (packed_half ? "CPU 2:1" :
+                    (packed_9to8 ? "CPU 9:8" : "CPU")), LCD_BUFFERS);
         s_frames = 0;
         s_report_us = now;
     }

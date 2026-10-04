@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Select an exact RGB888 9:8 run-copy scaler automatically for 720-pixel-wide
+  input fitted to 640 pixels (480p), alongside the existing 720p 2:1 path.
+  Both use the bounded fast CPU budget; other formats retain general scaling.
 - Promote three-buffer CPU rendering to the recommended Function EV LCD
   profile: about 28-29 updates/s at 720p, visually confirmed smooth during
   gameplay. Add per-buffer safe-reuse tracking. PPA stays off; generic builds

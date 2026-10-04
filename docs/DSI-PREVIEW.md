@@ -88,6 +88,24 @@ Keep a known-good two-buffer build for rollback. Never publish local firmware
 with embedded credentials. Startup still includes the verified diagnostic
 pause; allow about 30 seconds for live video.
 
+## Automatic CPU scaling paths
+
+RGB888 1280-to-640 uses the existing packed 2:1 scaler. RGB888 720-to-640
+(480p) now copies eight adjacent pixels out of every nine, preserving the
+general nearest-neighbor scaler's exact output. Selection follows each frame's
+dimensions, not a persistent 480p/720p setting. Vertical sampling, aspect ratio,
+buffer handoff, and remote priority are unchanged. BGR/YUV and other ratios
+retain the general path. Both specialized paths use the existing bounded 90%
+local copy budget; this is not a guaranteed frame rate.
+
+The 9:8 path is tested against the reference for output lengths 0-640,
+randomized pixels, tails, and unaligned buffers with ASan/UBSan:
+
+```sh
+cc -O2 -Wall -Wextra -fsanitize=address,undefined tools/test_lcd_rgb_9to8.c -o /tmp/test-lcd-rgb-9to8
+/tmp/test-lcd-rgb-9to8
+```
+
 ## Earlier performance trials (historical)
 
 The following measurements describe earlier builds, not the recommended
