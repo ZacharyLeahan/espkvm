@@ -4,6 +4,32 @@ This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/e
 
 **The local LCD now works: nearly 30 fps (measured 28-29 updates/sec) during a 720p game, visually confirmed smooth and playable on our setup.** The 720p input is scaled to 640×360 on the 640×480 screen; this is not native 720p or 30-fps browser streaming. Latency has not been measured.
 
+## Why this fork
+
+The goal is **repeatable homebrew testing on a real original Xbox**, by humans
+and eventually coding agents: build, deploy, launch, observe fresh video, send
+controller inputs, and save pass/fail evidence. This complements emulator-based
+development with checks on the actual console; it does not replace an emulator
+or debugger.
+
+- **Works today:** HDMI capture, local touchscreen preview, network viewing,
+  and a [read-only test-evidence collector](docs/XBOX-TESTING.md). Xbox input
+  remains manual.
+- **Next milestone:** prove a real controller button works through the ESP,
+  then demonstrate menu navigation with verified screen changes. Controller
+  emulation, automated deployment/launch, and reliable reset recovery are not
+  implemented. A controller reset combination cannot guarantee recovery from
+  a hard hang.
+- **Tooling direction:** a small CLI first, agent workflow instructions next,
+  and an optional MCP wrapper over the same operations. Tests should use bounded
+  button presses, automatic release, fresh-frame checks, timeouts, and recorded
+  build IDs. This is a roadmap, not an available controller API.
+
+Video and input can remain independent: a future test rig could use direct USB
+HDMI capture for higher-rate observation while keeping the ESP for controller
+input. That alternative has not been validated here. The first end-to-end proof
+will be a repeatable real-hardware menu test, not a claim of autonomous debugging.
+
 ## Local LCD
 
 - Three framebuffers and packed CPU scaling improve the measured 720p preview from about 20 to 28-29 updates/sec. Hardware PPA scaling stays disabled because it produced visible tearing.

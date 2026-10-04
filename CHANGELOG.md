@@ -37,6 +37,8 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Clarify the real-Xbox homebrew testing goal, current observation capabilities,
+  and planned controller/CLI/agent milestones without implying they exist yet.
 - Add a read-only Xbox observation collector with timestamped status/events,
   optional JPEG evidence, and a manual regression checklist. No controller
   interface or REST schema changes; HDMI lock is not treated as frame freshness.
