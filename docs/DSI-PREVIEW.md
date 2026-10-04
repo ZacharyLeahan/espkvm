@@ -98,6 +98,13 @@ buffer handoff, and remote priority are unchanged. BGR/YUV and other ratios
 retain the general path. Both specialized paths use the existing bounded 90%
 local copy budget; this is not a guaranteed frame rate.
 
+Initial hardware sample on 2026-10-03: 720x480p60 input measured 297 LCD
+updates in 10014 ms (29.7 updates/s), with about 19.9 ms frame preparation,
+versus roughly 20 updates/s and 30 ms on the general path. This includes
+the developer strip, three buffers, no remote viewers, and PPA disabled.
+Visual confirmation and a live 480p-to-720p transition test are still pending
+for this build; the existing 2:1 scaler's reference test continues to pass.
+
 The 9:8 path is tested against the reference for output lengths 0-640,
 randomized pixels, tails, and unaligned buffers with ASan/UBSan:
 
