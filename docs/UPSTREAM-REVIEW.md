@@ -41,32 +41,47 @@ submodule just to update this ledger; those are separate implementation steps.
 - Inventory date: 2026-10-03.
 - Shared base: [`77045e1`](https://github.com/espkvm/espkvm/commit/77045e1ccc336151ec7ef15049812523ec921c75).
 - Last inventoried upstream tip: [`ce519cc`](https://github.com/espkvm/espkvm/commit/ce519ccb63cca1fb9f0ee8de6a670278838d5bb4) (v0.58.0).
-- Coverage: 13 commits after the shared base. All remain **Pending**; this is
-  initial triage from commit/file inventories and selected networking diffs,
-  not a completed code/security audit. None has been integrated by this review.
+- Coverage: decisions recorded for all 13 commits on 2026-10-03: **5 partial
+  adaptations planned, 3 ignored, 5 deferred**. Selected relevant diffs were
+  inspected; this is scope/prioritization, not a completed security audit or
+  implementation sign-off. None has been integrated by this review.
 - The inventory tip marks what we listed, not what we adopted or fully reviewed.
 
-## Review queue
+## Decisions
 
-| Upstream commit / scope | Decision | Initial recommendation / questions | Our implementation / verification |
+| Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
 | --- | --- | --- | --- |
-| [5d18b5b](https://github.com/espkvm/espkvm/commit/5d18b5b08037c970d83e7947fce9dc9be349bc3f): FireBeetle Wi-Fi pins | Pending | Likely ignore board-specific changes; check shared pin reservations before deciding. | None |
-| [c5761dc](https://github.com/espkvm/espkvm/commit/c5761dc7db6e798e54bbcea1bbcde468f23c3319): Wi-Fi memory, power saving, co-processor update support | Pending | Priority adaptation candidate: Function EV network fixes. Measure added PSRAM pressure with three LCD buffers. Do not bundle a C6 firmware update into the fix. | None |
-| [09e7920](https://github.com/espkvm/espkvm/commit/09e792014de0446bef92269ef681ed549f396aa6): archive builds, FireBeetle validation, README | Pending | Consider source-archive build improvements separately; board/marketing changes are probably irrelevant. | None |
-| [cc3daee](https://github.com/espkvm/espkvm/commit/cc3daee460ecea6a6fa35ac637a3abea39be7dd4): board schematic corrections | Pending | Check Function EV and shared pin changes; defer other boards. | None |
-| [338c8ce](https://github.com/espkvm/espkvm/commit/338c8ce17f1f89e65f0264e9dc0ca043c0376091): notifications, 2FA, RTC, update URLs | Pending | Split by feature. No blanket import into our no-login profile; review shared settings and update behavior separately. | None |
-| [42a0d1c](https://github.com/espkvm/espkvm/commit/42a0d1c836e5cd693275c6c938675acbdd986a7a): release and dependency pins | Pending | Priority review of Microlink fixes, not just the release title. Inspect each newly pinned dependency commit and preserve our logging changes where needed. | None |
-| [5afe5a5](https://github.com/espkvm/espkvm/commit/5afe5a5888db1fea216a9d81babb2af5cc6d1c8c): H.264 Wi-Fi playback | Pending | Review if enabling H.264; current HTTP/MJPEG setup may not benefit. Includes console submodule changes. | None |
-| [ab5e0e7](https://github.com/espkvm/espkvm/commit/ab5e0e720bf9bf87a9de4225e6d9a1ba4610ed0d): upstream flasher redirect | Pending | Likely ignore upstream hosting deployment; not our device firmware. | None |
-| [7918023](https://github.com/espkvm/espkvm/commit/79180238746747056354a79e8338d07ae0e56d57): upstream firmware publishing | Pending | Likely ignore upstream hosting workflow; revisit only for our own release system. | None |
-| [6f96380](https://github.com/espkvm/espkvm/commit/6f9638042615f01906c3569105d9b7022212798d): update checks and missing-C6 boot recovery | Pending | Priority adaptation candidate for boot recovery; review update/TLS changes separately and preserve the Xbox profile. | None |
-| [4565409](https://github.com/espkvm/espkvm/commit/45654092ff35b3055eef3df2861607bbe4ff3762): initial setup hotspot | Pending | Review interaction with our saved Wi-Fi, failover and no-login behavior before considering. | None |
-| [e5c109e](https://github.com/espkvm/espkvm/commit/e5c109e58d5d6d4eb91b219d4f0c88e32371793b): password/network onboarding | Pending | Likely defer password-driven UX; inspect shared server changes for relevant fixes. | None |
-| [ce519cc](https://github.com/espkvm/espkvm/commit/ce519ccb63cca1fb9f0ee8de6a670278838d5bb4): CEC and pointer lock | Pending | CEC is not Xbox USB gamepad emulation. Assess any actual use separately; preserve capture-bridge changes and review console/HID dependencies. | None |
+| [5d18b5b](https://github.com/espkvm/espkvm/commit/5d18b5b08037c970d83e7947fce9dc9be349bc3f): FireBeetle Wi-Fi pins | Ignored | FireBeetle-only pin/default changes do not affect our Function EV. Revisit if supporting that board. | Not applicable |
+| [c5761dc](https://github.com/espkvm/espkvm/commit/c5761dc7db6e798e54bbcea1bbcde468f23c3319): Wi-Fi memory, power saving, co-processor update support | Adapt planned (partial) | Take Wi-Fi power-saving disablement first; separately adapt aligned SDIO/lwIP PSRAM allocation with measured memory headroom. Keep our small TCP buffers. Ignore co-processor updater/UI additions and do not flash the C6. | Not implemented; test Wi-Fi latency, heap/PSRAM, remote streaming and LCD together. |
+| [09e7920](https://github.com/espkvm/espkvm/commit/09e792014de0446bef92269ef681ed549f396aa6): archive builds, FireBeetle validation, README | Adapt planned (partial) | Take explicit CMake component paths to remove dependence on a preserved symlink. Ignore FireBeetle/marketing edits; defer release-archive packaging until we publish archives. | Not implemented; test recursive-clone build and source copy with submodule content but without the symlink. |
+| [cc3daee](https://github.com/espkvm/espkvm/commit/cc3daee460ecea6a6fa35ac637a3abea39be7dd4): board schematic corrections | Adapt planned (partial) | Reserve Function EV GPIO 6 for co-processor IO2 and correct the SD_PWRn comment without changing SD power behavior. Ignore unrelated board changes. | Not implemented; check pin-conflict tests and unchanged Function EV runtime pins. |
+| [338c8ce](https://github.com/espkvm/espkvm/commit/338c8ce17f1f89e65f0264e9dc0ca043c0376091): notifications, 2FA, RTC, update URLs | Deferred | No current need for RTC hardware, notifications or 2FA UX. Revisit when one becomes a fork requirement. Do not migrate this fork to upstream firmware manifests; our releases must preserve Xbox/LCD customizations. | No implementation planned now; this is not a declaration that authentication is unnecessary on untrusted LANs. |
+| [42a0d1c](https://github.com/espkvm/espkvm/commit/42a0d1c836e5cd693275c6c938675acbdd986a7a): release and dependency pins | Adapt planned (partial) | Adapt the Microlink reliability fixes behind this dependency bump: handshake time, receive handling, endpoint validation, TLS cleanup, core locking and framed JSON parsing. Preserve quiet packet logs; do not import unrelated release/console changes. | Not implemented; review dependency commits individually, then test Tailscale direct/relay connections, reboot reconnection and repeated failures. |
+| [5afe5a5](https://github.com/espkvm/espkvm/commit/5afe5a5888db1fea216a9d81babb2af5cc6d1c8c): H.264 Wi-Fi playback | Deferred | H.264 recovery is useful but our tested deployment is HTTP/MJPEG. Revisit before offering H.264, with both server and matching console changes plus secure-context requirements. | No implementation planned now. |
+| [ab5e0e7](https://github.com/espkvm/espkvm/commit/ab5e0e720bf9bf87a9de4225e6d9a1ba4610ed0d): upstream flasher redirect | Ignored | Upstream website/flasher deployment is not our firmware or release destination. Design fork-specific publishing if needed later. | Not applicable |
+| [7918023](https://github.com/espkvm/espkvm/commit/79180238746747056354a79e8338d07ae0e56d57): upstream firmware publishing | Ignored | Upstream firmware-host publishing workflow is not ours. Do not inherit deployment destinations or credentials assumptions. | Not applicable |
+| [6f96380](https://github.com/espkvm/espkvm/commit/6f9638042615f01906c3569105d9b7022212798d): update checks and missing-C6 boot recovery | Adapt planned (partial) | Take network-stack initialization before optional C6 startup to avoid a boot assertion when the co-processor is unavailable. Defer redirect/certificate-bundle update changes until a fork-specific updater is designed. | Not implemented; test normal boot, warm restarts and simulated C6-start failure without changing hardware wiring. |
+| [4565409](https://github.com/espkvm/espkvm/commit/45654092ff35b3055eef3df2861607bbe4ff3762): initial setup hotspot | Deferred | Automatic open setup-hotspot behavior is coupled to upstream onboarding. Keep our current saved-Wi-Fi/failover behavior; revisit as a deliberate credential-free first-run experience. | No implementation planned now; any future setup AP must restrict unauthenticated control. |
+| [e5c109e](https://github.com/espkvm/espkvm/commit/e5c109e58d5d6d4eb91b219d4f0c88e32371793b): password/network onboarding | Deferred | Password-driven network selection does not fit our present profile. Revisit together with setup-hotspot/onboarding design, rather than importing auth and console changes piecemeal. | No implementation planned now. |
+| [ce519cc](https://github.com/espkvm/espkvm/commit/ce519ccb63cca1fb9f0ee8de6a670278838d5bb4): CEC and pointer lock | Deferred | CEC and relative-mouse pointer lock are not the original-Xbox USB controller path. Revisit for a demonstrated HDMI-adapter/CEC use case or PC-target support; do not add extra bridge/task load now. | No implementation planned now. |
 
-## Completed decisions
+## Implementation order and acceptance gates
 
-None yet. Move or summarize decided rows here as the review progresses. For an
-ignored change, record why and any revisit condition; for an adapted change,
-link our commit, specify the subset, and record validation. Do not use this
-ledger's own commit as the implementation link.
+1. **Boot recovery** (`6f96380` subset): small, targeted resilience fix.
+2. **Function EV pin reservation** (`cc3daee` subset): prevent GPIO misuse.
+3. **Wi-Fi latency** (`c5761dc` power-saving subset): measure before/after;
+   keep memory changes separate so regressions can be isolated.
+4. **Microlink reliability** (`42a0d1c` dependency subset): inspect and record
+   actual dependency source hashes when adapting; test clock synchronization,
+   reconnect after reboot, direct/relay paths and long-running streams.
+5. **Wi-Fi memory allocation** (`c5761dc` subset): adopt only if simultaneous
+   LCD/network testing preserves headroom and avoids allocation failures.
+   Three-buffer LCD mode previously left about 0.5 MB free PSRAM; moving more
+   buffers there is a tradeoff, not a free improvement.
+6. **Build portability** (`09e7920` subset): independent low-risk build cleanup.
+
+These decisions select work; they do not authorize execution in this review.
+All adaptation links remain unfilled because no implementation exists yet.
+Each future implementation gets its own commit URL and test evidence here;
+ignored/deferred entries need no pretend implementation commit. If testing
+rejects a planned adaptation, record that outcome and its reason explicitly.
