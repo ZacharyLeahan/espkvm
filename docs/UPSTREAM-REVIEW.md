@@ -44,7 +44,8 @@ submodule just to update this ledger; those are separate implementation steps.
 - Coverage: decisions recorded for all 13 commits on 2026-10-03: **5 partial
   adaptations planned, 3 ignored, 5 deferred**. Selected relevant diffs were
   inspected; this is scope/prioritization, not a completed security audit or
-  implementation sign-off. None has been integrated by this review.
+  implementation sign-off. On 2026-10-04, three of those upstream commits had
+  selected subsets implemented below; memory and dependency work remains planned.
 - The inventory tip marks what we listed, not what we adopted or fully reviewed.
 
 ## Decisions
@@ -80,8 +81,19 @@ submodule just to update this ledger; those are separate implementation steps.
    buffers there is a tradeoff, not a free improvement.
 6. **Build portability** (`09e7920` subset): independent low-risk build cleanup.
 
-These decisions select work; they do not authorize execution in this review.
-All adaptation links remain unfilled because no implementation exists yet.
-Each future implementation gets its own commit URL and test evidence here;
-ignored/deferred entries need no pretend implementation commit. If testing
-rejects a planned adaptation, record that outcome and its reason explicitly.
+## First implementation batch (2026-10-04)
+
+The decision table above records the original scope; these implementation
+records supersede its "Not implemented" status only for the named subsets:
+
+| Source subset | Implementation | Verification / remaining gaps |
+| --- | --- | --- |
+| `6f96380`: network initialization before C6 startup | [d2e8925](https://github.com/ZacharyLeahan/espkvm/commit/d2e8925b48280ab8bcd5715c62e64e19ec7a2ae8) — Adapted (partial) | Build and host tests pass; normal hardware boot succeeds. Missing-C6 fault injection and repeated warm restarts not tested. Updater changes omitted. |
+| `cc3daee`: Function EV GPIO 6 reservation and SD power comment | [d42614a](https://github.com/ZacharyLeahan/espkvm/commit/d42614acdb3a24764e177b77c990ada318efcff0) — Adapted (partial) | Build and host tests pass; runtime SD power behavior unchanged. Other boards omitted. |
+| `c5761dc`: disable station modem sleep | [9135969](https://github.com/ZacharyLeahan/espkvm/commit/91359693f01474014f34ed4c15926906708119f1) — Adapted (partial; memory work still planned) | Wi-Fi HTTP status responds after flashing; 720p60 input and about 28 LCD updates/s logged. No before/after latency claim, long soak or Tailscale validation yet. Memory/updater portions omitted. |
+
+Implementation commits are local until explicitly pushed. Hardware logs establish
+submission rate, not visual smoothness; post-flash visual/touch confirmation is
+pending. No controller input work is included. Each future implementation gets
+its own commit URL and evidence; ignored/deferred entries need no implementation
+commit. If testing rejects an adaptation, record that result explicitly.
