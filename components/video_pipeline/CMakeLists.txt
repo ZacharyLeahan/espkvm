@@ -13,6 +13,7 @@ idf_component_register(
         "capture_flat_scan.c"
         "capture_snapshot.c"
         "capture_dsi_preview.c"
+        "capture_lcd_control.c"
         "h264_probe.c"
         "video_frame.c"
     INCLUDE_DIRS "include"

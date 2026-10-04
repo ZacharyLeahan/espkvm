@@ -54,8 +54,9 @@ Smaller per-connection TCP buffers improved Wi-Fi stability in our test. Longer 
 For homebrew testing, use the [read-only observation helper and regression checklist](docs/XBOX-TESTING.md) to record HDMI mode changes, timestamps and optional screenshots against your build. Controller input remains manual.
 
 [microSD recording trial and GIF workflow](docs/SD-RECORDING.md): 480p gameplay
-recorded at about 28 fps with the LCD disabled. Automatic LCD/recording switching
-is not implemented yet.
+recorded at about 28 fps with the LCD disabled. A new experimental top-right
+LCD Record/Stop control keeps the display enabled using a 720p-max memory
+profile; simultaneous performance is being validated.
 
 ## Xbox compatibility / recovery
 

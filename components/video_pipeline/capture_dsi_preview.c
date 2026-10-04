@@ -17,6 +17,8 @@
 #include "lcd_rgb_9to8.h"
 #include "lcd_status_strip.h"
 #include "lcd_touch_toggle.h"
+#include "lcd_record_button.h"
+#include "capture_lcd_control.h"
 #include "kvm_thermal.h"
 
 #include <string.h>
@@ -89,6 +91,8 @@ static unsigned s_lcd_fps10;
 static atomic_bool s_stats_visible = true;
 static bool s_show_stats = true;
 static i2c_master_dev_handle_t s_touch;
+static uint16_t s_touch_w = LCD_W, s_touch_h = LCD_H;
+static capture_lcd_record_state_t s_record;
 
 /* GT911 protocol: Espressif esp-bsp/components/lcd_touch/esp_lcd_touch_gt911.
  * Preserve the panel MCU's reset/configuration; we need only contact presence. */
@@ -106,9 +110,21 @@ static void touch_task(void *arg)
             const uint8_t ack[] = {0x81, 0x4e, 0};
             err = i2c_master_transmit(s_touch, ack, sizeof(ack), 20);
             if (err == ESP_OK && lcd_touch_toggle_event(&gesture, report[0], esp_timer_get_time())) {
-                bool visible = !atomic_load(&s_stats_visible);
-                atomic_store(&s_stats_visible, visible);
-                ESP_LOGI(TAG, "touch: LCD stats %s", visible ? "shown" : "hidden");
+                unsigned raw_x = report[2] | ((unsigned)report[3] << 8);
+                unsigned raw_y = report[4] | ((unsigned)report[5] << 8);
+                if (raw_x >= s_touch_w || raw_y >= s_touch_h) continue;
+                unsigned x = raw_x * LCD_W / s_touch_w;
+                unsigned y = raw_y * LCD_H / s_touch_h;
+                ESP_LOGI(TAG, "touch: raw %u,%u mapped %u,%u", raw_x, raw_y, x, y);
+                capture_lcd_record_state_t record;
+                capture_lcd_record_state(&record);
+                if (record.available && lcd_record_hit(x, y, LCD_W, LCD_H)) {
+                    capture_lcd_record_toggle();
+                } else {
+                    bool visible = !atomic_load(&s_stats_visible);
+                    atomic_store(&s_stats_visible, visible);
+                    ESP_LOGI(TAG, "touch: LCD stats %s", visible ? "shown" : "hidden");
+                }
             }
         }
         if (err != ESP_OK) {
@@ -136,6 +152,14 @@ static void touch_init(void)
         uint8_t id[4] = {0};
         esp_err_t err = i2c_master_transmit_receive(s_touch, reg, sizeof(reg), id, sizeof(id), 20);
         if (err == ESP_OK && !memcmp(id, "911", 3)) {
+            const uint8_t size_reg[] = {0x80, 0x48};
+            uint8_t size[4];
+            if (i2c_master_transmit_receive(s_touch, size_reg, 2, size, 4, 20) == ESP_OK) {
+                unsigned w = size[0] | ((unsigned)size[1] << 8);
+                unsigned h = size[2] | ((unsigned)size[3] << 8);
+                if (w && h) { s_touch_w = w; s_touch_h = h; }
+            }
+            ESP_LOGI(TAG, "GT911 coordinate range: %ux%u", s_touch_w, s_touch_h);
             if (xTaskCreate(touch_task, "lcd_touch", 3072, NULL, 2, NULL) == pdPASS) {
                 ESP_LOGI(TAG, "GT911 touch ready at 0x%02x: tap to toggle stats", addresses[i]);
                 return;
@@ -173,6 +197,7 @@ void capture_dsi_preview_tick(uint32_t completed)
 {
 #if CONFIG_KVM_DSI_STATUS_STRIP
     if (!s_fb) return;
+    capture_lcd_record_state(&s_record);
     const bool show = atomic_load(&s_stats_visible);
     if (show != s_show_stats) {
         s_show_stats = show;
@@ -188,7 +213,9 @@ void capture_dsi_preview_tick(uint32_t completed)
     capture_status_get(&status);
     const char *state = lcd_status_state(status.signal, status.too_fast,
                                         s_fresh_us ? now - s_fresh_us : -1);
-    const int viewers = video_frame_viewer_count();
+    const int consumers = video_frame_viewer_count();
+    const int viewers = consumers > (s_record.local_consumer ? 1 : 0)
+        ? consumers - (s_record.local_consumer ? 1 : 0) : 0;
     static uint32_t last_w, last_h;
     static uint8_t last_hz;
     static bool last_interlaced;
@@ -205,7 +232,9 @@ void capture_dsi_preview_tick(uint32_t completed)
         } else if (!s_strip_us) s_strip_us = now;
         snprintf(s_strip, sizeof(s_strip), "%s %lu%c%uHz LCD %u.%u V:%d %s", state,
                  (unsigned long)status.vres, status.interlaced ? 'i' : 'p', status.input_hz,
-                 s_lcd_fps10 / 10, s_lcd_fps10 % 10, viewers, viewers ? "REMOTE" : "LOCAL");
+                 s_lcd_fps10 / 10, s_lcd_fps10 % 10, viewers,
+                 viewers ? "REMOTE" : s_record.recording ? "RECORD" : "LOCAL");
+        if (s_record.message[0]) snprintf(s_strip, sizeof(s_strip), "%s", s_record.message);
         if (changed) {
             ESP_LOGI(TAG, "LCD status: %s; HDMI %lux%lu", s_strip,
                      (unsigned long)status.hres, (unsigned long)status.vres);
@@ -219,6 +248,8 @@ void capture_dsi_preview_tick(uint32_t completed)
         s_idle_us = now;
         memset(s_fb, 0, LCD_FB_BYTES);
         lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+        if (s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
+            s_record.recording, s_record.busy, s_record.seconds);
         /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
         s_clear_buffer[s_draw_index] = true;
         submit_preview();
@@ -719,7 +750,10 @@ fail:
 
 bool capture_dsi_preview_due(void)
 {
-    const bool remote = video_frame_viewer_count() > 0;
+    capture_lcd_record_state_t record;
+    capture_lcd_record_state(&record);
+    /* The recorder is one encoded-frame consumer, not a remote spectator. */
+    const bool remote = video_frame_viewer_count() > (record.local_consumer ? 1 : 0);
     const int fps = kvm_thermal_fps_limit(remote ? PREVIEW_REMOTE_FPS : PREVIEW_LOCAL_FPS);
     if (!s_fb || fps <= 0 || (int32_t)(s_dma_frames - s_reuse_after[s_draw_index]) < 0) {
         return false;
@@ -877,6 +911,8 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     }
 #if CONFIG_KVM_DSI_STATUS_STRIP
     if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+    if (s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
+        s_record.recording, s_record.busy, s_record.seconds);
 #endif
     if (!submit_preview()) return;
 #if CONFIG_KVM_DSI_STATUS_STRIP

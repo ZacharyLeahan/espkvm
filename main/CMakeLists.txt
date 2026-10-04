@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c"
+    SRCS "main.c" "lcd_record_control.c"
     INCLUDE_DIRS "."
     REQUIRES
         video_pipeline

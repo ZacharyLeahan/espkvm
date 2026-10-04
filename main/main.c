@@ -21,6 +21,7 @@
 #include "nvs_flash.h"
 
 #include "capture.h"
+#include "lcd_record_control.h"
 #include "kvm_display.h"
 #include "kvm_log.h"
 #include "ethernet.h"
@@ -648,6 +649,7 @@ void app_main(void)
         ESP_ERROR_CHECK(kvm_storage_init());
         kvm_storage_set_slot_changed_cb(on_slot_changed);
         kvm_record_init();
+        lcd_record_control_init();
     } else {
         ESP_LOGI(TAG, "boot: storage skipped (WiFi mode; the co-processor holds the SD slot)");
     }

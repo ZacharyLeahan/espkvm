@@ -2,7 +2,7 @@
 
 # microSD recording: first hardware trial
 
-Experimental, not yet a one-button LCD/recording mode switch. Keep a private
+Experimental. Keep a private
 known-good firmware backup and restore it after testing. Never publish local
 sdkconfig files or firmware containing network credentials.
 
@@ -73,5 +73,41 @@ the FPS cap after encoder initialization left nominal 20-fps metadata in the
 Preserve the demuxer time base when checking decode errors. The GIF filter
 explicitly resamples to 25 fps rather than claiming all HDMI frames were saved.
 
-Next engineering step: a safe runtime LCD/recorder resource handoff, avoiding
-a firmware reflash for each mode. Not implemented by this trial.
+## Experimental LCD Record/Stop control
+
+The status-strip build now includes a persistent top-right `REC` touch target.
+Tap it to select H.264, a 30-fps target, and 4,000 kbit/s, then record to the
+card. It changes to `STOP` with a minutes:seconds timer. Tap again to close
+the file and restore the prior codec/rate/bitrate. Taps elsewhere still toggle
+stats. The overlay is LCD-only and is not burned into recordings.
+
+The recorder runs on a separate control task. Failed starts show an LCD
+message and restore settings; detailed reasons remain in the system log.
+Automatic stops (including the configured recording duration) also restore
+settings. A power interruption cannot run that restoration or close the file:
+stop from the button before disconnecting power. A deliberate web-setting
+change is not overwritten if it differs from the recording preset.
+
+For this memory-constrained hardware, append `boards/funcev_lcd_record.defaults`
+to the live three-buffer LCD profile. This opts into fixed **1280x720 maximum
+capture allocations**, instead of reserving for 1920x1080. 480p and 720p stay
+within that bound; larger inputs are not supported by this profile. Keep the
+normal profile for 1080p, and retain a known-good private rollback image.
+
+Local recording is no longer treated as a remote viewer for the LCD's 1-fps
+limit. Additional video consumers still receive remote priority. Both outputs
+target smooth video, but simultaneous rates require hardware measurement;
+30 fps on each is a target, not a guarantee.
+
+First simultaneous 480p result (2026-10-04): the user verified the top-right
+Record/Stop taps, timer, and smooth picture. A longer clip stopped from the
+LCD contained 891 decoded frames over 33.933 seconds (26.26 fps), zero
+recorder-reported drops, and no decode errors. LCD diagnostics during the
+recording were about 26-27 updates/s, returning to about 30 after stopping.
+The subsequent build caches button rasterization and labels local recording
+separately from remote viewing. Simultaneous 720p and a long soak are pending.
+
+GT911 coordinate parsing follows the [Espressif driver](https://github.com/espressif/esp-bsp/blob/master/components/lcd_touch/esp_lcd_touch_gt911/esp_lcd_touch_gt911.c).
+The panel's existing configuration supplies the coordinate range; no touch
+reset or configuration rewrite is performed. Confirm the top-right hit target
+on hardware. Host tests cover drawing bounds and touch press/hold debounce.

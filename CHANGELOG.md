@@ -37,6 +37,12 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Experimental LCD Record/Stop touch control and elapsed timer, with a
+  separate recording worker, settings restoration, and a 720p-max memory
+  profile for simultaneous LCD/SD trials. Local recording no longer triggers
+  the remote-viewer LCD throttle. Record/Stop taps and smooth 480p display were
+  user-verified; a 34-second simultaneous clip measured 26.26 fps with zero
+  recorder drops. Simultaneous 720p remains untested.
 - Document the first microSD recording trial: LCD-disabled 480p H.264 clips,
   measured delivery rates, memory limits, and a host-side GIF workflow.
 - Clarify the real-Xbox homebrew testing goal, current observation capabilities,
