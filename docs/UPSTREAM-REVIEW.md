@@ -92,8 +92,10 @@ records supersede its "Not implemented" status only for the named subsets:
 | `cc3daee`: Function EV GPIO 6 reservation and SD power comment | [d42614a](https://github.com/ZacharyLeahan/espkvm/commit/d42614acdb3a24764e177b77c990ada318efcff0) — Adapted (partial) | Build and host tests pass; runtime SD power behavior unchanged. Other boards omitted. |
 | `c5761dc`: disable station modem sleep | [9135969](https://github.com/ZacharyLeahan/espkvm/commit/91359693f01474014f34ed4c15926906708119f1) — Adapted (partial; memory work still planned) | Wi-Fi HTTP status responds after flashing; 720p60 input and about 28 LCD updates/s logged. No before/after latency claim, long soak or Tailscale validation yet. Memory/updater portions omitted. |
 
-Implementation commits are local until explicitly pushed. Hardware logs establish
-submission rate, not visual smoothness; post-flash visual/touch confirmation is
-pending. No controller input work is included. Each future implementation gets
+Hardware logs establish submission rate, not visual smoothness. On 2026-10-04,
+the user confirmed smooth 720p gameplay and working tap-to-toggle after this
+flash. A separate 20-second status collection completed with ten samples and
+zero request failures; this is not a long soak test. No controller input work
+is included. Each future implementation gets
 its own commit URL and evidence; ignored/deferred entries need no implementation
 commit. If testing rejects an adaptation, record that result explicitly.
