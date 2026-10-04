@@ -423,6 +423,10 @@ static esp_err_t wifi_start_sta(void)
      * reachable. The station associates from the STA_START event, only if an SSID
      * is set. */
     ESP_RETURN_ON_FALSE(esp_wifi_start() == ESP_OK, ESP_FAIL, TAG, "wifi start");
+    /* This mains-powered video device favors latency over modem sleep. */
+    if (esp_wifi_set_ps(WIFI_PS_NONE) != ESP_OK) {
+        ESP_LOGW(TAG, "could not disable Wi-Fi power saving");
+    }
     if (hotspot) {
         char apssid[33];
         derive_ap_ssid(apssid, sizeof(apssid));
