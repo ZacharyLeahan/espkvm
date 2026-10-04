@@ -61,4 +61,7 @@ For this exact screen, use the [recommended LCD build](docs/DSI-PREVIEW.md#recom
 
 ## Credits
 
+We selectively review upstream instead of automatically syncing this specialized fork.
+See the [upstream review ledger](docs/UPSTREAM-REVIEW.md) for decisions, source commits, and links to our adaptations.
+
 Based on [ESP-KVM](https://github.com/espkvm/espkvm), itself built on [jrowny/p4kvm](https://github.com/jrowny/p4kvm). Original attribution is preserved in [NOTICE](NOTICE); licensed under [Apache-2.0](LICENSE).

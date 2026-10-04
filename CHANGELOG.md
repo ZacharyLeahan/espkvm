@@ -34,6 +34,8 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Start an upstream review ledger covering 13 commits through v0.58.0, with
+  pending triage, decision rules, and source-to-adaptation commit links.
 - Add GT911 tap-to-toggle for local LCD stats, with press/release latching,
   debounce and bounded I2C polling. Video geometry is unchanged; signal-loss
   warnings remain visible. Touch does not send Xbox controller input.
