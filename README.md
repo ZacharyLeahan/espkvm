@@ -1,6 +1,18 @@
 # ESP-KVM for the Original Xbox
 
-This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/espkvm/espkvm)**, streaming the console's HDMI video to a browser over the local network or Tailscale. Development lives on `xbox-experiments`.
+This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/espkvm/espkvm)**. View Xbox HDMI on a small local LCD or stream it to a browser over LAN/Tailscale. Code and our recommended configuration live on [`xbox-experiments`](https://github.com/ZacharyLeahan/espkvm/tree/xbox-experiments).
+
+**The local LCD now works: nearly 30 fps (measured 28-29 updates/sec) during a 720p game, visually confirmed smooth and playable on our setup.** The 720p input is scaled to 640×360 on the 640×480 screen; this is not native 720p or 30-fps browser streaming. Latency has not been measured.
+
+## Local LCD
+
+- Three framebuffers and packed CPU scaling improve the measured 720p preview from about 20 to 28-29 updates/sec. Hardware PPA scaling stays disabled because it produced visible tearing.
+- The extra buffer uses 900 KiB of PSRAM, leaving about 0.5 MB free in our test. This is a measured tradeoff for this setup, not a universal maximum-performance claim.
+- With no remote viewer, resources favor the LCD. Connecting a KVM viewer prioritizes network video and reduces the LCD to **at most 1 fps**; disconnecting restores local performance automatically.
+- The **Waveshare 3.5-inch DSI LCD (E)** is not listed as supported/tested by Waveshare's ESP32 driver. We got live HDMI working in this fork and shared our findings on [Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430). This is a community implementation, not official vendor support or a confirmed upstream fix.
+- Touch input and the touchscreen Xbox-controller overlay are **not implemented**. Extended soak testing and repeated resolution changes with the new three-buffer profile remain to be done.
+
+[LCD setup, timings, and test history](docs/DSI-PREVIEW.md).
 
 ## Video
 
@@ -26,19 +38,23 @@ These are observations, not blanket compatibility guarantees. Zero reconnects do
 
 ## Our hardware
 
-| Part | Bought from | Our order total (USD) |
-| --- | --- | ---: |
-| Espressif ESP32-P4 Function EV board (ordered as P4X-Function-EV; P4 rev 3.2, C6 Wi-Fi) | AliExpress | $95.54 |
-| Geekworm C790 HDMI-to-CSI-2 bridge (Toshiba TC358743) | AliExpress | $85.32 |
-| **Working browser-capture hardware total** | | **$180.86** |
-| Waveshare 3.5-inch DSI LCD (E), 640×480 touch (optional; local video preview **not yet working**) | Amazon | $39.17 |
-| **All three purchases** | | **$220.03** |
+| Part | What it does | Bought from | Our order total (USD) |
+| --- | --- | --- | ---: |
+| Espressif ESP32-P4 Function EV board (ordered as P4X-Function-EV; P4 rev 3.2, C6 Wi-Fi) | Runs capture, LCD rendering, and the web KVM | AliExpress | $95.54 |
+| Geekworm C790 HDMI-to-CSI-2 bridge (Toshiba TC358743) | Takes Xbox HDMI into the ESP's MIPI CAMERA connector | AliExpress | $85.32 |
+| **Browser-capture hardware total** | | | **$180.86** |
+| Waveshare 3.5-inch DSI LCD (E), 640×480 capacitive touch | Optional local HDMI preview via MIPI DISPLAY; touch not implemented | Amazon | $39.17 |
+| **All three purchases** | | | **$220.03** |
 
-Prices are historical order totals from the September 18 (AliExpress) and September 30 (Amazon) 2026 confirmation emails, not current quotes or bare component prices. The LCD currently shows color bars, not the Xbox picture; it is **not** required for browser capture. [LCD diagnostic notes](docs/DSI-PREVIEW.md). This list does not include the Xbox's HDMI adapter, cables, or a case.
+Prices are historical order totals verified against the September 18 (AliExpress) and September 30 (Amazon) 2026 confirmation emails, not current quotes. The LCD's item price was $36.95 before the $39.17 order total. This excludes the Xbox HDMI adapter, cables, power supply, and case.
+
+Connect Xbox HDMI → C790 → ESP **MIPI CAMERA**, and ESP **MIPI DISPLAY** → LCD. Both ribbon connections must use the correct pinout/contact orientation; disconnect power before handling them. USB-Serial-JTAG is used for power/flashing. The LCD needs no HDMI splitter and is optional for browser capture.
 
 ## Build and use
 
 Follow the [Xbox build instructions](docs/XBOX-FORK.md). Optionally copy [`.env.example`](.env.example) to an ignored `.env` and fill in your Wi-Fi credentials; never publish firmware containing your password.
+
+For this exact screen, use the [recommended LCD build](docs/DSI-PREVIEW.md#recommended-build) with `boards/funcev_dsi_live.defaults` (three buffers, CPU scaling). The browser-only build keeps the LCD disabled. Allow roughly 30 seconds for the initial checkerboard to give way to HDMI video.
 
 **Security:** this experimental profile uses HTTP with no application login. Tailscale secures tailnet traffic, but the local-network interface is still unauthenticated. Use a trusted, restricted LAN and never port-forward it.
 

@@ -1,9 +1,35 @@
 # Waveshare 3.5-inch DSI LCD (E): live Xbox preview verified
 
-This is an **opt-in experiment**, not a supported display feature. The user
+## Recommended local LCD configuration (2026-10-03)
+
+`CONFIG_KVM_DSI_PREVIEW_BUFFERS=3` lets the CPU prepare a spare frame while
+the previous display handoff completes. Each retired buffer retains its own
+DMA-completion deadline; the renderer never reuses the selected display
+buffer. The live profile now selects three buffers and disables PPA. Generic
+Kconfig builds retain two buffers; LCD preview itself remains opt-in.
+
+1280x720 -> 640x360 measurements: approximately 280-293 LCD updates per ten
+seconds (28-29 fps), roughly 29 ms per packed CPU copy, and about 0.5 MB free
+PSRAM. The user confirmed the 720p game looked "super smooth" with no remote
+viewer. This is our recommended daily-use LCD configuration for this hardware,
+not a guarantee of 30 fps, measured latency, or long-term stability.
+
+The third buffer costs 921600 bytes. A short simultaneous MJPEG test reported
+88 frames in 30 seconds, zero reconnects, and a 0.68-second longest gap at that
+sample. It was stopped manually, not completed as a long soak. LCD updates
+dropped below 1 fps as designed; after disconnecting, logs returned to 28-29
+fps and the user confirmed smooth gameplay. Extended combined load, microSD,
+Tailscale, and repeated mode-change testing of this memory tradeoff remain open.
+
+This is **community support in this fork**, not official Waveshare support. The user
 confirmed both the standalone yellow/black checkerboard and then the live
 Xbox image on the physical LCD. Keep `CONFIG_KVM_DSI_PREVIEW`
-disabled in normal builds. No touchscreen controls are implemented.
+disabled on builds without this LCD. No touchscreen controls are implemented.
+
+We shared the working startup settings on
+[Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430).
+That report does not establish that Waveshare merged a fix or that the same
+settings work on the issue author's different board.
 
 The verified checkpoint uses `boards/funcev_dsi_pll.defaults`: one lane at
 576 Mb/s, continuous clock, 24 MHz RGB888, non-burst sync events, and no HS
@@ -13,8 +39,9 @@ the test; the necessary subset has not yet been isolated. The bridge's PLL
 registers reverted by the later readback, so successful output does not prove
 those writes alone fixed it. This standalone profile disables CSI capture.
 
-For the live HDMI integration trial, replace the final defaults file with
-`boards/funcev_dsi_live.defaults`. Use a fresh build directory/configuration
+## Recommended build
+
+Use `boards/funcev_dsi_live.defaults`. Use a fresh build directory/configuration
 so an older standalone setting does not override these defaults:
 
 ```sh
@@ -22,6 +49,19 @@ so an older standalone setting does not override these defaults:
 idf.py -B build.dsi-live -D SDKCONFIG=build.dsi-live/sdkconfig \
   -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;boards/funcev_p4.defaults;boards/funcev_xbox.defaults;boards/funcev_dsi_live.defaults' build
 ```
+
+Configure Wi-Fi on the device; this command does not import `.env`. For an
+existing configuration, explicitly select `CONFIG_KVM_DSI_PREVIEW_BUFFERS=3`
+and disable `CONFIG_KVM_DSI_PREVIEW_PPA` in menuconfig: defaults do not override
+saved sdkconfig choices. Flash using `idf.py -B build.dsi-live -p YOUR_PORT flash`.
+Keep a known-good two-buffer build for rollback. Never publish local firmware
+with embedded credentials. Startup still includes the verified diagnostic
+pause; allow about 30 seconds for live video.
+
+## Earlier performance trials (historical)
+
+The following measurements describe earlier builds, not the recommended
+three-buffer profile above.
 
 The first live trial retains the ten-second diagnostic pause and limits LCD
 updates to 5 fps. These are bring-up settings, not performance claims.

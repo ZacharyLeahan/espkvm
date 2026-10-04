@@ -19,6 +19,11 @@ guarantee of zero gaps; longer-term and remote-link testing remain open. See
 
 ## Build
 
+For the optional Waveshare 3.5-inch DSI LCD (E), use the
+[recommended LCD build](DSI-PREVIEW.md#recommended-build). That profile selects
+three-buffer CPU rendering, visually confirmed smooth at about 28-29 LCD
+updates/sec during a 720p game. The helper below remains browser-only.
+
 Use ESP-IDF 6.1 and initialize submodules:
 
 ```sh

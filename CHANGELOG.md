@@ -8,6 +8,10 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Promote three-buffer CPU rendering to the recommended Function EV LCD
+  profile: about 28-29 updates/s at 720p, visually confirmed smooth during
+  gameplay. Add per-buffer safe-reuse tracking. PPA stays off; generic builds
+  retain two buffers because the third consumes another 900 KiB of PSRAM.
 - Identify packed CPU scaling in LCD diagnostics and test a 90% local budget
   for that path. The measured 720p output remains about 20 fps; preserve the
   separate low-rate remote-viewer policy.
