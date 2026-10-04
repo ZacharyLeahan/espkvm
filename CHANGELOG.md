@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Retry failed LCD startup up to three times with DSI teardown and bounded
+  settling delays. An unavailable display still allows browser capture;
+  this does not yet provide runtime recovery for a stalled LCD.
 - Keep the LCD overlay visible during recording and start/stop transitions.
   Near-misses no longer hide Stop; idle tap-to-hide behavior is unchanged.
 - Make the LCD tap-to-hide toggle global: hide stats, recording controls and

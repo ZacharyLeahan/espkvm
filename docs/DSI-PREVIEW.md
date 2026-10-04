@@ -42,6 +42,22 @@ those writes alone fixed it. This standalone profile disables CSI capture.
 
 ## Recommended build
 
+### LCD startup failure recovery (2026-10-04)
+
+Startup now makes at most three attempts, recreating the DSI host after each
+failure and waiting one then two seconds between attempts. This is startup
+recovery only, not a runtime LCD watchdog. If all attempts fail, capture and
+the web service continue without local preview. The successful panel timing
+and PLL sequence are unchanged.
+
+Hardware test: all three ICN6211 ID reads timed out, but the device remained
+reachable and CSI reported 300 completed 1280x720 frames per five seconds.
+This verifies bounded failure handling, **not restored LCD output or reliable
+HDMI hot-plugging**. The touch controller still acknowledged at 0x5d; that
+alone does not verify the DSI data connection. Disconnect power before checking
+or reseating the display ribbon. Further hot-plug testing is pending a working
+LCD connection.
+
 ### Developer status strip
 
 `CONFIG_KVM_DSI_STATUS_STRIP` defaults on when LCD preview is enabled. The

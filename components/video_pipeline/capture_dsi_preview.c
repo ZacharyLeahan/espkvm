@@ -323,6 +323,13 @@ static void preview_cleanup(void)
         s_ws_control = NULL;
     }
     s_fb = NULL;
+    memset(s_buffers, 0, sizeof(s_buffers));
+    memset(s_reuse_after, 0, sizeof(s_reuse_after));
+    memset(s_clear_buffer, 0, sizeof(s_clear_buffer));
+    s_draw_index = 0;
+    s_submitted_index = 0;
+    s_dma_frames = 0;
+    s_dma_core = -1;
 }
 
 static void waveshare_control_write(uint8_t reg, uint8_t value)
@@ -600,7 +607,7 @@ static esp_err_t icn6211_configure_mipi_pll(void)
 
 #endif
 
-void capture_dsi_preview_init(void)
+static esp_err_t preview_start_once(void)
 {
     waveshare_control_init();
     const esp_ldo_channel_config_t ldo_cfg = {
@@ -646,7 +653,7 @@ void capture_dsi_preview_init(void)
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE
     ESP_LOGW(TAG, "read-only ICN6211 DSI probe; no framebuffer video will start");
     icn6211_probe();
-    return;
+    return ESP_OK;
 #endif
 #if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
     err = icn6211_disable_bist();
@@ -707,6 +714,9 @@ void capture_dsi_preview_init(void)
 #endif
     s_fb = s_buffers[0];
     if (err != ESP_OK || !s_fb) {
+        if (err == ESP_OK) {
+            err = ESP_ERR_NO_MEM;
+        }
         goto fail;
     }
     fill_startup_pattern();
@@ -746,12 +756,44 @@ void capture_dsi_preview_init(void)
 #if CONFIG_KVM_DSI_STATUS_STRIP
     touch_init();
 #endif
-    return;
+    return ESP_OK;
 
 fail:
-    ESP_LOGE(TAG, "DSI preview unavailable: %s; capture and browser continue",
-             esp_err_to_name(err));
     preview_cleanup();
+    return err;
+}
+
+void capture_dsi_preview_init(void)
+{
+    /* Startup only: never tear down a live panel underneath the touch task.
+     * Recreate the host after a timed-out BTA rather than reuse its FIFOs.
+     * Bound retries so an absent LCD cannot prevent browser capture starting. */
+    if (s_bus) {
+        return;
+    }
+    for (unsigned attempt = 1; attempt <= 3; ++attempt) {
+        if (esp_task_wdt_status(NULL) == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+        ESP_LOGI(TAG, "LCD startup attempt %u/3", attempt);
+        esp_err_t err = preview_start_once();
+        if (err == ESP_OK) {
+            return;
+        }
+        ESP_LOGW(TAG, "LCD startup attempt %u/3 failed: %s", attempt,
+                 esp_err_to_name(err));
+        if (attempt < 3) {
+            /* Give the panel MCU time to settle without starving the watched
+             * capture task. No power cycling of the shared CSI/DSI PHY LDO. */
+            for (unsigned i = 0; i < attempt * 10; ++i) {
+                if (esp_task_wdt_status(NULL) == ESP_OK) {
+                    esp_task_wdt_reset();
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        }
+    }
+    ESP_LOGE(TAG, "LCD startup exhausted; capture and browser continue without preview");
 }
 
 bool capture_dsi_preview_due(void)
