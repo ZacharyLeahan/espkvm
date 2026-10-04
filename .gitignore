@@ -114,3 +114,5 @@ version.txt
 # Scratch space for whatever a session needs on the side: device logs pulled off
 # a board, capture dumps, one-off measuring scripts. None of it is source.
 ignore/
+# Local screenshots and test evidence may contain private content.
+/observations/

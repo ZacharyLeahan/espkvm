@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Initialize networking before optional C6 startup, reserve Function EV GPIO 6,
+  and disable station modem sleep for interactive video. Adapt upstream fixes
+  separately; Wi-Fi PSRAM allocation and Microlink changes remain pending.
 - Select an exact RGB888 9:8 run-copy scaler automatically for 720-pixel-wide
   input fitted to 640 pixels (480p), alongside the existing 720p 2:1 path.
   Both use the bounded fast CPU budget; other formats retain general scaling.
@@ -34,6 +37,9 @@ bumps the patch).
   rates, and the hardware and historical purchase totals used for this build.
 
 ### Added
+- Add a read-only Xbox observation collector with timestamped status/events,
+  optional JPEG evidence, and a manual regression checklist. No controller
+  interface or REST schema changes; HDMI lock is not treated as frame freshness.
 - Start an upstream review ledger covering 13 commits through v0.58.0, with
   pending triage, decision rules, and source-to-adaptation commit links.
 - Add GT911 tap-to-toggle for local LCD stats, with press/release latching,

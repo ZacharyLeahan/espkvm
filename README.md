@@ -25,6 +25,8 @@ Smaller per-connection TCP buffers improved Wi-Fi stability in our test. Longer 
 
 **Xbox gamepad emulation is not implemented.** See the [controller proposal](docs/XBOX-REMOTE-CONTROLLER.md).
 
+For homebrew testing, use the [read-only observation helper and regression checklist](docs/XBOX-TESTING.md) to record HDMI mode changes, timestamps and optional screenshots against your build. Controller input remains manual.
+
 ## Xbox compatibility / recovery
 
 Observed on our hardware with build `70b054e9f`, local Wi-Fi, a 6-FPS stream cap, and JPEG quality 75:
