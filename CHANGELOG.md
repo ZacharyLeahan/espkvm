@@ -8,6 +8,8 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Keep the LCD overlay visible during recording and start/stop transitions.
+  Near-misses no longer hide Stop; idle tap-to-hide behavior is unchanged.
 - Make the LCD tap-to-hide toggle global: hide stats, recording controls and
   timer together without stopping recording. Hidden controls cannot trigger;
   the next tap reveals the overlay first.

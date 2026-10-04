@@ -124,7 +124,8 @@ static void touch_task(void *arg)
                     lcd_record_hit(x, y, LCD_W, LCD_H)) {
                     capture_lcd_record_toggle();
                 } else {
-                    bool visible = !atomic_load(&s_stats_visible);
+                    bool visible = lcd_overlay_after_tap(atomic_load(&s_stats_visible),
+                                                         record.recording, record.busy);
                     atomic_store(&s_stats_visible, visible);
                     ESP_LOGI(TAG, "touch: LCD overlay %s", visible ? "shown" : "hidden");
                 }
@@ -201,6 +202,8 @@ void capture_dsi_preview_tick(uint32_t completed)
 #if CONFIG_KVM_DSI_STATUS_STRIP
     if (!s_fb) return;
     capture_lcd_record_state(&s_record);
+    /* Also reveal controls if recording was started remotely while hidden. */
+    if (s_record.recording || s_record.busy) atomic_store(&s_stats_visible, true);
     const bool show = atomic_load(&s_stats_visible);
     if (show != s_show_stats) {
         s_show_stats = show;

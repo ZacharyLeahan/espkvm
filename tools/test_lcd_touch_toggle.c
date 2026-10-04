@@ -5,6 +5,12 @@
 int main(void)
 {
     lcd_touch_toggle_t s = {0};
+    assert(!lcd_overlay_after_tap(true, false, false));
+    assert(lcd_overlay_after_tap(false, false, false));
+    assert(lcd_overlay_after_tap(true, true, false));
+    assert(lcd_overlay_after_tap(false, true, false));
+    assert(lcd_overlay_after_tap(true, false, true));
+    assert(lcd_overlay_after_tap(false, false, true));
     assert(lcd_touch_toggle_event(&s, 0x81, 1000000));
     assert(!lcd_touch_toggle_event(&s, 0, 1100000));
     assert(!lcd_touch_toggle_event(&s, 0x82, 1400000));

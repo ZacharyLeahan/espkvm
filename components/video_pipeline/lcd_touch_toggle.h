@@ -8,6 +8,12 @@ typedef struct {
     int64_t next_press_us;
 } lcd_touch_toggle_t;
 
+/* Keep Stop reachable while recording or processing a start/stop request. */
+static inline bool lcd_overlay_after_tap(bool visible, bool recording, bool busy)
+{
+    return recording || busy || !visible;
+}
+
 /* A not-ready packet is NOT a release. Only valid controller reports change
  * the latch; held fingers and multiple fingers form one gesture. */
 static inline bool lcd_touch_toggle_event(lcd_touch_toggle_t *s, uint8_t report, int64_t now)
