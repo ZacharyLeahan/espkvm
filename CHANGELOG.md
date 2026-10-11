@@ -8,6 +8,8 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Test a random-static BLE identity after public-address pairing still failed
+  with peer DHKey-check error `0x50B`; identity persistence remains pending.
 - Match the Series BLE reference's pairing auth-request flags after the first
   controller rejected the DHKey check; show a specific pairing-rejected status.
   Hardware retry pending, with encrypted Just Works pairing retained.

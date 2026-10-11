@@ -40,6 +40,9 @@ The first physical pairing attempt connected but was rejected by the controller
 with peer SMP DHKey-check error `0x50B`. The next test matches the reference's
 bonding + MITM-request + Secure Connections flags, with NoInputNoOutput I/O.
 That I/O model still means Just Works pairing, not verified MITM protection.
+The auth-flag retry also failed with `0x50B`. The next diagnostic uses a
+random-static own address, matching [the original Xbox BLE client reference](https://github.com/asukiaaa/esp32-client-for-xbox-controller-with-nim-ble/blob/master/src/main.cpp).
+This test identity is stable within a boot, not yet persisted across reboots.
 
 ### Wired and remote input baseline
 

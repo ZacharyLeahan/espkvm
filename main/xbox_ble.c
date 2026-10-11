@@ -172,9 +172,18 @@ static int gap_event(struct ble_gap_event *event,void *arg)
 }
 static void on_sync(void)
 {
-    int rc=ble_hs_util_ensure_addr(0);
-    if(!rc) rc=ble_hs_id_infer_auto(0,&s_addr_type);
-    ESP_LOGI(TAG,"HCI synchronized, address result=%d",rc);
+    /* Xbox BLE reference uses RANDOM rather than the controller's public
+     * address. Keep one random-static identity for this diagnostic boot. */
+    static ble_addr_t identity;
+    static bool have_identity;
+    int rc=0;
+    if(!have_identity) {
+        rc=ble_hs_id_gen_rnd(0,&identity);
+        if(!rc) have_identity=true;
+    }
+    if(!rc) rc=ble_hs_id_set_rnd(identity.val);
+    s_addr_type=BLE_OWN_ADDR_RANDOM;
+    ESP_LOGI(TAG,"HCI synchronized, random-static address result=%d",rc);
     atomic_store(&s_synced,rc==0);
     if(rc) atomic_store(&s_state,FAILED);
 }
