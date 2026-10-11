@@ -128,13 +128,14 @@ static void touch_task(void *arg)
                 capture_lcd_record_state(&record);
                 unsigned mode = atomic_load(&s_ui_mode);
                 uint8_t keys[6] = {0};
+                int16_t axes[4] = {0};
                 bool hit = false;
 #if CONFIG_KVM_USB_XBOX
                 if (lcd_ui_pad(mode) && !menu_gesture) for (unsigned i=0;i<count;i++) {
                     unsigned px=report[2+8*i] | ((unsigned)report[3+8*i]<<8);
                     unsigned py=report[4+8*i] | ((unsigned)report[5+8*i]<<8);
                     if(px<s_touch_w && py<s_touch_h)
-                        hit |= lcd_pad_hit(px*LCD_W/s_touch_w,py*LCD_H/s_touch_h,keys);
+                        hit |= lcd_pad_hit(px*LCD_W/s_touch_w,py*LCD_H/s_touch_h,keys,axes);
                 }
 #endif
                 if (press && !hit && lcd_ui_stats(mode) && record.available &&
@@ -153,7 +154,7 @@ static void touch_task(void *arg)
                     ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad)",mode);
                 }
                 if (hit || pad_active) {
-                    capture_lcd_pad_keys(keys);
+                    capture_lcd_pad_keys(keys,axes,hit);
                     pad_active = hit;
                     pad_seen = now;
                 }
@@ -162,7 +163,8 @@ static void touch_task(void *arg)
         /* Lost touch reports must not leave a virtual control held. */
         if (pad_active && (err != ESP_OK || esp_timer_get_time()-pad_seen > 250000)) {
             const uint8_t neutral[6] = {0};
-            capture_lcd_pad_keys(neutral);
+            const int16_t centered[4] = {0};
+            capture_lcd_pad_keys(neutral,centered,false);
             pad_active = false;
         }
         if (err != ESP_OK) {

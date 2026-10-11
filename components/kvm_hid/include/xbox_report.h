@@ -2,6 +2,14 @@
 #pragma once
 #include <stdint.h>
 #include <string.h>
+static inline void xbox_report_axes(uint8_t out[20], const int16_t axes[4])
+{
+    for (unsigned i=0;i<4;i++) {
+        uint16_t v=(uint16_t)axes[i];
+        out[12+2*i]=v & 255;
+        out[13+2*i]=v >> 8;
+    }
+}
 
 /* Original Xbox XID wire report: digital mask, eight pressure values,
  * then four signed little-endian stick axes. No native struct padding. */
@@ -22,10 +30,6 @@ static inline void xbox_keyboard_report(const uint8_t keys[6], uint8_t out[20])
     ly = (held[0x1a] - held[0x16]) * 32767; /* W - S */
     rx = (held[0x0f] - held[0x0d]) * 32767; /* L - J */
     ry = (held[0x0c] - held[0x0e]) * 32767; /* I - K */
-    const int axes[4] = {lx, ly, rx, ry};
-    for (unsigned i = 0; i < 4; ++i) {
-        uint16_t v = (uint16_t)axes[i];
-        out[12+2*i] = v & 255;
-        out[13+2*i] = v >> 8;
-    }
+    const int16_t axes[4] = {lx, ly, rx, ry};
+    xbox_report_axes(out,axes);
 }

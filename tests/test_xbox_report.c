@@ -34,5 +34,9 @@ int main(void)
     memset(keys,0,sizeof(keys)); keys[0] = keys[1] = 0x1d;
     xbox_keyboard_report(keys,report);
     assert(report[4] == 255 && report[1] == 20 && report[3] == 0);
+    const int16_t analog[4]={12345,-16384,32767,-32767};
+    xbox_report_axes(report,analog);
+    for(unsigned i=0;i<4;i++) assert((int16_t)((unsigned)report[12+i*2] | ((unsigned)report[13+i*2]<<8))==analog[i]);
+    assert(report[4]==255); /* Analog updates preserve the A button. */
     puts("Xbox report encoding: PASS");
 }

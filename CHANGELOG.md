@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Make local touchscreen sticks proportional, with a radial dead zone and
+  independent signed XID axes. Preserve button combinations and release safety;
+  network keyboard stick mappings remain full-deflection.
 - Add experimental local Xbox touchscreen controls and a four-mode cycle on
   unused letterbox space: hidden, stats, stats + controller, controller.
   Preserve Stop visibility while recording, release stale touch inputs, and

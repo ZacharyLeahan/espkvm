@@ -6,7 +6,8 @@ controller. An opt-in XID firmware implementation is now available for initial
 hardware testing. On 2026-10-11 the real Xbox enumerated it and a 200 ms D-pad
 Down press moved XBMC from Games to Movies. All individual controls were then
 checked in Xbox Controller Tool on physical controller port 1 (see below).
-Gameplay, proportional analog input, and touchscreen controls remain unverified.
+The initial touchscreen overlay was confirmed working by the operator.
+Gameplay and the subsequent proportional-stick update still need validation.
 
 ## Physical-console validation (2026-10-11)
 
@@ -46,16 +47,21 @@ the outermost 16-pixel top/bottom edges provide the cycle gesture instead.
 The controller is drawn over the local picture only, without changing the
 HDMI capture, stream or recording. It has D-pad, A/B/X/Y, Black/White, LT/RT,
 Start/Back, L3/R3 and two virtual stick regions. Multiple touch contacts can
-press controls together (up to six mapped keys). Stick regions have a center
-dead zone and full-deflection directions/diagonals, not proportional travel
-yet. Lift to release. Missing touch reports release local inputs as a safety
+press controls together (up to six mapped button keys). Stick regions send
+independent signed analog axes: an 8-pixel radial dead zone, then linear
+magnitude up to full tilt at the 52-pixel rim. Diagonals retain their angle;
+they do not force both axes to maximum. Moving outside the region or lifting
+releases that stick. Network keyboard stick mappings remain full-deflection.
+Missing touch reports release local inputs as a safety
 measure; fresh local presses take priority over network keyboard input.
 
 During recording or a start/stop transition, mode cycling is locked so Stop
 cannot disappear. A recording started remotely also reveals stats/Stop.
-The first LCD version needs hands-on touch alignment/hold/release verification;
-host tests cover mode order, recording lock, hitboxes, stick directions and
-framebuffer bounds. Physical USB controls were tested separately above.
+The first digital LCD version was confirmed working by the operator; the
+analog update needs hands-on verification. Host tests cover mode order,
+recording lock, hitboxes, radial dead zone, monotonic travel, signed wire
+encoding and framebuffer bounds. Physical USB controls were tested separately
+above.
 
 Use the existing ESP-KVM video path to view an original Xbox remotely, then use
 the ESP32-P4 USB device port to present a virtual original Xbox controller. The

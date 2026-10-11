@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #pragma once
 #include "lcd_status_strip.h"
+#include <math.h>
 
 enum { LCD_UI_NONE, LCD_UI_STATS, LCD_UI_BOTH, LCD_UI_PAD };
 static inline bool lcd_ui_stats(unsigned mode) { return mode == LCD_UI_STATS || mode == LCD_UI_BOTH; }
@@ -25,8 +26,18 @@ static inline void lcd_pad_add(uint8_t keys[6], uint8_t key)
 {
     for (unsigned i=0;i<6;i++) { if(keys[i]==key) return; if(!keys[i]) { keys[i]=key; return; } }
 }
-/* Full-deflection virtual sticks for initial controller testing; center dead zone. */
-static inline bool lcd_pad_hit(unsigned x,unsigned y,uint8_t keys[6])
+/* Radial 8px dead zone; continuous magnitude to full tilt at the 52px rim.
+ * Screen Y grows down, Xbox stick Y grows up. No keyboard quantization. */
+static inline void lcd_pad_axis(int dx,int dy,int16_t out[2])
+{
+    float radius=sqrtf((float)dx*dx+(float)dy*dy);
+    out[0]=out[1]=0;
+    if(radius<=8.0f) return;
+    float magnitude=fminf((radius-8.0f)/44.0f,1.0f);
+    out[0]=(int16_t)lroundf(dx/radius*magnitude*32767.0f);
+    out[1]=(int16_t)lroundf(-dy/radius*magnitude*32767.0f);
+}
+static inline bool lcd_pad_hit(unsigned x,unsigned y,uint8_t keys[6],int16_t axes[4])
 {
     for(unsigned i=0;i<sizeof(lcd_pad_buttons)/sizeof(lcd_pad_buttons[0]);i++) {
         const lcd_pad_button_t *b=&lcd_pad_buttons[i];
@@ -35,10 +46,7 @@ static inline bool lcd_pad_hit(unsigned x,unsigned y,uint8_t keys[6])
     for(unsigned i=0;i<2;i++) {
         int dx=(int)x-(i?396:232), dy=(int)y-354;
         if(dx*dx+dy*dy > 52*52) continue;
-        if(dx < -16) lcd_pad_add(keys,i?0x0d:0x04);
-        if(dx > 16) lcd_pad_add(keys,i?0x0f:0x07);
-        if(dy < -16) lcd_pad_add(keys,i?0x0c:0x1a);
-        if(dy > 16) lcd_pad_add(keys,i?0x0e:0x16);
+        lcd_pad_axis(dx,dy,&axes[2*i]);
         return true;
     }
     return false;

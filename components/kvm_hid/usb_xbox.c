@@ -76,14 +76,13 @@ void usb_xbox_keyboard(const uint8_t keys[6])
 }
 
 /* Physical touch has priority while fresh; never mix local and remote states. */
-void usb_xbox_touch(const uint8_t keys[6])
+void usb_xbox_touch(const uint8_t keys[6], const int16_t axes[4], bool active)
 {
     if (!s_queue || !keys || xSemaphoreTake(s_input_mu,pdMS_TO_TICKS(10)) != pdTRUE) return;
-    bool held=false;
-    for(unsigned i=0;i<6;i++) held |= keys[i] != 0;
-    s_local_until=held ? esp_timer_get_time()+300000 : 0;
+    s_local_until=active ? esp_timer_get_time()+300000 : 0;
     uint8_t report[20];
     xbox_keyboard_report(keys,report);
+    xbox_report_axes(report,axes);
     xQueueReset(s_queue);
     (void)xQueueSend(s_queue,report,0);
     xSemaphoreGive(s_input_mu);
