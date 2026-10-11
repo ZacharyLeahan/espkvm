@@ -486,6 +486,8 @@ menu "ESP-KVM"
             bool "Add the chip's internal pull-ups to the co-processor's SDIO lines"
             depends on KVM_WIFI
             default y if KVM_BOARD_WAVESHARE_WIFI6
+            # No SDIO pull-ups at all on its schematic (DFR1172 V1.0).
+            default y if KVM_BOARD_FIREBEETLE2_P4
             default n
             help
                 SDIO needs its lines pulled up, and Espressif ask for 10k on CMD

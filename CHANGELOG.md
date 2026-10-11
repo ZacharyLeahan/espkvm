@@ -177,6 +177,16 @@ bumps the patch).
   Xbox 720p-to-480p transition testing is still in progress; this is not yet a
   validated automatic-resolution baseline.
 
+## [0.56.1] - 2026-09-30
+
+### Fixed
+- **Wi-Fi on the DFRobot FireBeetle 2 ESP32-P4.** Its schematic has no pull-up
+  resistors on the SDIO lines to the ESP32-C6, which esp-hosted needs; the
+  firmware now adds the chip's own, as it already did for the Waveshare
+  ESP32-P4-WIFI6. GPIO 6, the C6's wake line, is no longer offered as a free
+  pin. Found through #63, the first report from this board: capture and USB
+  work on it.
+
 ## [0.56.0] - 2026-09-29
 
 ### Added
