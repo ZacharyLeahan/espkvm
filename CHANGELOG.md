@@ -8,6 +8,11 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add bounded Bluetooth link recovery (up to three rescans per local Bluetooth
+  session), peer-scoped repeat-pairing repair without a security downgrade, and
+  clearer connection/security diagnostics. Trial a six-second supervision
+  timeout after observed `0x208` link timeouts. Physical reconnect validation
+  remains pending; bonds and identity are still not persisted across reboots.
 - Record operator-confirmed Series Bluetooth button operation on the original
   Xbox (2026-10-11, `f8aec1c`). Update the README for touchscreen/BLE controls
   and the separate unresolved rolling-LCD issue. Analog precision, reconnect,

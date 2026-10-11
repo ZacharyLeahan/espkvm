@@ -24,6 +24,15 @@ Enter the Bluetooth mode and hold the Series
 controller's Pair button until its light flashes rapidly. Leaving that LCD
 mode disconnects and releases inputs; retry by cycling back into it.
 
+Reconnect recovery is experimental: transient link loss triggers up to three
+rescans, two seconds apart before each scan, within the current Bluetooth mode.
+Exiting the mode cancels recovery. A peer requesting repeat pairing can replace
+only its own bond once per connection, with Secure Connections and a 16-byte key;
+an authenticated bond cannot be replaced with an unauthenticated one. Bonds
+are not globally cleared. Link timeout tolerance is being tested at six seconds
+(previously 2.56 seconds); USB's stale-input release remains 500 ms. This has not
+yet been demonstrated to fix the observed reconnect failure.
+
 Only the `Xbox Wireless Controller` advertisement and HID input report ID 1
 with a 16-byte payload are accepted. Sticks remain proportional; 10-bit
 triggers scale to 8-bit XID pressure. RB maps to Black, LB to White. Guide and
@@ -65,10 +74,11 @@ reference clients do. Only report ID 1 is translated; other report IDs are
 not treated as gamepad buttons. LCD `CONTROLLER INPUT ACTIVE` now requires a
 valid received gamepad report; periodic logs count notifications and forwards.
 
-Separate unresolved display issue: the operator observed repeated/rolling LCD
+Separate display issue: the operator observed repeated/rolling LCD
 output during this test. The network JPEG was clean, and logs showed two LCD
-initialization timeouts followed by write-only fallback. This is a suspected
-LCD-output initialization/timing fault, not a proven root cause or a fixed issue.
+initialization timeouts followed by write-only fallback. The operator then
+reseated the ribbon and reported that the screen was fixed. No LCD software fix
+was established by this observation; Bluetooth reconnect failures continued.
 
 ### Wired and remote input baseline
 
