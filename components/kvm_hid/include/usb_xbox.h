@@ -7,3 +7,5 @@ esp_err_t usb_xbox_init(void);
 void usb_xbox_keyboard(const uint8_t keys[6]);
 void usb_xbox_touch(const uint8_t keys[6], const int16_t axes[4], bool active);
 void usb_xbox_release(void);
+/* Validated XID state from the local wireless controller; NULL releases it. */
+void usb_xbox_bluetooth(const uint8_t report[20]);

@@ -8,6 +8,10 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Extend the experimental Bluetooth mode with encrypted Series-controller
+  pairing, HID report subscription, and analog XID translation. Host parser
+  tests pass; physical pairing/input validation is pending. Disconnect and
+  stale-input safety release controls. Rumble is not implemented.
 - Add opt-in fifth LCD mode for Xbox BLE discovery through the onboard C6.
   This is a radio diagnostic, not yet pairing or controller-input forwarding.
   Keep it disabled by default while validating Wi-Fi/LCD coexistence.

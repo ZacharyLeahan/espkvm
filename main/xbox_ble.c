@@ -10,35 +10,163 @@
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
+#include "host/ble_sm.h"
+#include "usb_xbox.h"
+#include "xbox_ble_report.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-/* First establish the installed C6's HCI path before adding bonding and HID
- * subscriptions. Never auto-update or reset its working Wi-Fi firmware. */
-enum { OFF, STARTING, SCANNING, FOUND, FAILED, TIMEOUT };
+/* Use the installed C6's HCI path; never auto-update its Wi-Fi firmware.
+ * Pair only during the explicit local Bluetooth mode, one controller at a time. */
+enum { OFF, STARTING, SCANNING, FOUND, FAILED, TIMEOUT, PAIRING, HID, READY };
 static atomic_uint s_state;
 static atomic_bool s_requested, s_synced;
+static atomic_uint s_conn=BLE_HS_CONN_HANDLE_NONE;
+static uint16_t s_start,s_end,s_input;
+static struct { uint16_t value,end,cccd,ref; } s_reports[8];
+static unsigned s_count,s_index;
+static bool s_discovering;
+void ble_store_config_init(void);
 static uint8_t s_addr_type;
 static const char *TAG="xbox_ble";
 const char *xbox_ble_status(void)
 {
     static const char *text[]={"BLUETOOTH IDLE","STARTING BLUETOOTH","SEARCHING: HOLD PAIR",
-        "XBOX FOUND - HID SETUP NEXT","BLUETOOTH INIT FAILED","NO CONTROLLER - REENTER TO RETRY"};
+        "CONNECTING XBOX","BLUETOOTH ERROR - RETRY","NO CONTROLLER - REENTER TO RETRY",
+        "PAIRING XBOX","READING CONTROLLER","CONNECTED - TEST BUTTONS"};
     return text[atomic_load(&s_state)];
 }
 void xbox_ble_mode(bool pairing) { atomic_store(&s_requested,pairing); }
+static void failed(const char *stage,int rc)
+{
+    ESP_LOGW(TAG,"%s failed: %d",stage,rc);
+    atomic_store(&s_state,FAILED);
+    usb_xbox_bluetooth(NULL);
+    unsigned c=atomic_load(&s_conn);
+    if(c!=BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(c,BLE_ERR_REM_USER_CONN_TERM);
+}
+static void next_report(void);
+static int subscribed(uint16_t c,const struct ble_gatt_error *e,struct ble_gatt_attr *a,void *arg)
+{
+    (void)c;(void)a;(void)arg;
+    if(e->status) failed("subscribe",e->status);
+    else { atomic_store(&s_state,READY); ESP_LOGI(TAG,"HID input subscribed: handle=%u",s_input); }
+    return 0;
+}
+static int report_ref(uint16_t c,const struct ble_gatt_error *e,struct ble_gatt_attr *a,void *arg)
+{
+    (void)arg;
+    uint8_t ref[2];
+    if(e->status || !a || OS_MBUF_PKTLEN(a->om)!=2 || os_mbuf_copydata(a->om,0,2,ref)) {
+        failed("report reference",e->status); return 0;
+    }
+    ESP_LOGI(TAG,"HID report id=%u type=%u",ref[0],ref[1]);
+    if(ref[0]==1 && ref[1]==1 && s_reports[s_index].cccd) {
+        s_input=s_reports[s_index].value;
+        uint8_t enable[2]={1,0};
+        int rc=ble_gattc_write_flat(c,s_reports[s_index].cccd,enable,2,subscribed,NULL);
+        if(rc) failed("enable notifications",rc);
+    } else { ++s_index; next_report(); }
+    return 0;
+}
+static int descriptors(uint16_t c,const struct ble_gatt_error *e,uint16_t value,
+                       const struct ble_gatt_dsc *d,void *arg)
+{
+    (void)value;(void)arg;
+    if(!e->status) {
+        unsigned uuid=ble_uuid_u16(&d->uuid.u);
+        if(uuid==0x2902) s_reports[s_index].cccd=d->handle;
+        if(uuid==0x2908) s_reports[s_index].ref=d->handle;
+    } else if(e->status==BLE_HS_EDONE) {
+        if(s_reports[s_index].ref) {
+            int rc=ble_gattc_read(c,s_reports[s_index].ref,report_ref,NULL);
+            if(rc) failed("read reference",rc);
+        } else { ++s_index; next_report(); }
+    } else failed("descriptors",e->status);
+    return 0;
+}
+static void next_report(void)
+{
+    if(s_index>=s_count) { failed("supported HID input missing",0); return; }
+    int rc=ble_gattc_disc_all_dscs(atomic_load(&s_conn),s_reports[s_index].value,
+                                 s_reports[s_index].end,descriptors,NULL);
+    if(rc) failed("discover descriptors",rc);
+}
+static int characteristics(uint16_t c,const struct ble_gatt_error *e,const struct ble_gatt_chr *ch,void *arg)
+{
+    (void)c;(void)arg;
+    if(!e->status) {
+        if(s_count && !s_reports[s_count-1].end) s_reports[s_count-1].end=ch->def_handle-1;
+        if(ble_uuid_u16(&ch->uuid.u)==0x2a4d && (ch->properties & BLE_GATT_CHR_PROP_NOTIFY)) {
+            if(s_count==8) { failed("too many HID reports",0); return 0; }
+            s_reports[s_count++].value=ch->val_handle;
+        }
+    } else if(e->status==BLE_HS_EDONE) {
+        if(s_count && !s_reports[s_count-1].end) s_reports[s_count-1].end=s_end;
+        s_index=0; next_report();
+    } else failed("characteristics",e->status);
+    return 0;
+}
+static int service(uint16_t c,const struct ble_gatt_error *e,const struct ble_gatt_svc *svc,void *arg)
+{
+    (void)arg;
+    if(!e->status) { s_start=svc->start_handle; s_end=svc->end_handle; }
+    else if(e->status==BLE_HS_EDONE && s_start) {
+        int rc=ble_gattc_disc_all_chrs(c,s_start,s_end,characteristics,NULL);
+        if(rc) failed("discover characteristics",rc);
+    } else failed("HID service",e->status);
+    return 0;
+}
 static int gap_event(struct ble_gap_event *event,void *arg)
 {
     (void)arg;
     if(event->type==BLE_GAP_EVENT_DISC) {
         struct ble_hs_adv_fields fields;
         if(!ble_hs_adv_parse_fields(&fields,event->disc.data,event->disc.length_data) &&
-           fields.name && fields.name_len>=4 && !memcmp(fields.name,"Xbox",4)) {
+           fields.name && fields.name_len==24 && !memcmp(fields.name,"Xbox Wireless Controller",24) &&
+           atomic_load(&s_requested) && atomic_load(&s_state)==SCANNING) {
             ESP_LOGI(TAG,"Xbox advertisement received, RSSI=%d",event->disc.rssi);
             atomic_store(&s_state,FOUND);
+            ble_gap_disc_cancel();
+            int rc=ble_gap_connect(s_addr_type,&event->disc.addr,10000,NULL,gap_event,NULL);
+            if(rc) failed("connect",rc);
         }
     } else if(event->type==BLE_GAP_EVENT_DISC_COMPLETE && atomic_load(&s_state)==SCANNING)
         atomic_store(&s_state,TIMEOUT);
+    else if(event->type==BLE_GAP_EVENT_CONNECT) {
+        if(event->connect.status) { failed("connection",event->connect.status); return 0; }
+        atomic_store(&s_conn,event->connect.conn_handle);
+        if(!atomic_load(&s_requested)) { ble_gap_terminate(event->connect.conn_handle,BLE_ERR_REM_USER_CONN_TERM); return 0; }
+        s_start=s_end=s_input=0; s_count=s_index=0; s_discovering=false;
+        memset(s_reports,0,sizeof(s_reports));
+        atomic_store(&s_state,PAIRING);
+        int rc=ble_gap_security_initiate(event->connect.conn_handle);
+        if(rc) failed("encryption",rc);
+    } else if(event->type==BLE_GAP_EVENT_ENC_CHANGE) {
+        struct ble_gap_conn_desc desc;
+        if(event->enc_change.status || ble_gap_conn_find(event->enc_change.conn_handle,&desc) || !desc.sec_state.encrypted) {
+            failed("pairing",event->enc_change.status); return 0;
+        }
+        if(!s_discovering) {
+            s_discovering=true; atomic_store(&s_state,HID);
+            int rc=ble_gattc_disc_svc_by_uuid(event->enc_change.conn_handle,BLE_UUID16_DECLARE(0x1812),service,NULL);
+            if(rc) failed("discover HID",rc);
+        }
+    } else if(event->type==BLE_GAP_EVENT_NOTIFY_RX && atomic_load(&s_requested) &&
+              atomic_load(&s_state)==READY && event->notify_rx.attr_handle==s_input &&
+              event->notify_rx.conn_handle==atomic_load(&s_conn)) {
+        uint8_t input[16],output[20];
+        unsigned n=OS_MBUF_PKTLEN(event->notify_rx.om);
+        if(n!=16 || os_mbuf_copydata(event->notify_rx.om,0,16,input) || !xbox_ble_report(input,n,output)) {
+            failed("unsupported report layout",n); return 0;
+        }
+        usb_xbox_bluetooth(output);
+    } else if(event->type==BLE_GAP_EVENT_DISCONNECT) {
+        atomic_store(&s_conn,BLE_HS_CONN_HANDLE_NONE);
+        usb_xbox_bluetooth(NULL);
+        atomic_store(&s_state,atomic_load(&s_requested)?FAILED:OFF);
+        ESP_LOGI(TAG,"Controller disconnected: %d",event->disconnect.reason);
+    }
     return 0;
 }
 static void on_sync(void)
@@ -53,6 +181,7 @@ static void on_reset(int reason)
 {
     atomic_store(&s_synced,false);
     atomic_store(&s_state,FAILED);
+    usb_xbox_bluetooth(NULL);
     ESP_LOGW(TAG,"Bluetooth host reset: %d",reason);
 }
 static void host_task(void *arg) { (void)arg; nimble_port_run(); nimble_port_freertos_deinit(); }
@@ -60,6 +189,7 @@ static void worker(void *arg)
 {
     (void)arg;
     bool attempted=false,was_requested=false;
+    unsigned setup_ticks=0;
     for(;;) {
         bool requested=atomic_load(&s_requested);
         if(requested && !attempted) {
@@ -74,6 +204,12 @@ static void worker(void *arg)
             if(err==ESP_OK) {
                 ble_hs_cfg.sync_cb=on_sync;
                 ble_hs_cfg.reset_cb=on_reset;
+                ble_hs_cfg.sm_io_cap=BLE_SM_IO_CAP_NO_IO;
+                ble_hs_cfg.sm_bonding=1;
+                ble_hs_cfg.sm_sc=1;
+                ble_hs_cfg.sm_our_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
+                ble_hs_cfg.sm_their_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
+                ble_store_config_init();
                 nimble_port_freertos_init(host_task);
                 for(unsigned i=0;i<50 && !atomic_load(&s_synced);i++) vTaskDelay(pdMS_TO_TICKS(100));
             }
@@ -90,8 +226,16 @@ static void worker(void *arg)
         }
         if(!requested && was_requested && atomic_load(&s_synced)) {
             ble_gap_disc_cancel();
+            ble_gap_conn_cancel();
+            unsigned c=atomic_load(&s_conn);
+            if(c!=BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(c,BLE_ERR_REM_USER_CONN_TERM);
+            usb_xbox_bluetooth(NULL);
             atomic_store(&s_state,OFF);
         }
+        unsigned state=atomic_load(&s_state);
+        if(state==FOUND || state==PAIRING || state==HID) {
+            if(++setup_ticks>=300) { failed("pairing/HID timeout",BLE_HS_ETIMEOUT); setup_ticks=0; }
+        } else setup_ticks=0;
         was_requested=requested;
         vTaskDelay(pdMS_TO_TICKS(100));
     }

@@ -11,6 +11,34 @@ Gameplay and the subsequent proportional-stick update still need validation.
 
 ## Physical-console validation (2026-10-11)
 
+### Experimental Series-controller Bluetooth bridge
+
+The fifth LCD mode is opt-in (`KVM_XBOX_BLE`), using NimBLE on the P4 and HCI
+over SDIO through the existing C6. Discovery was confirmed by the operator on
+2026-10-11. Encrypted pairing and forwarding are implemented for testing, not
+yet physically validated. Enter the Bluetooth mode and hold the Series
+controller's Pair button until its light flashes rapidly. Leaving that LCD
+mode disconnects and releases inputs; retry by cycling back into it.
+
+Only the `Xbox Wireless Controller` advertisement and HID input report ID 1
+with a 16-byte payload are accepted. Sticks remain proportional; 10-bit
+triggers scale to 8-bit XID pressure. RB maps to Black, LB to White. Guide and
+Share are ignored, and rumble is not forwarded. Touch inputs take priority,
+then fresh Bluetooth input, then browser keyboard input. No reports for 500 ms
+releases the USB state; verify long holds during physical testing.
+
+The current test configuration keeps bonds in RAM, so pairing after a reboot
+may require the Pair button again. Persistent reconnect and broader firmware
+report layouts are not yet supported. Wi-Fi and LCD coexistence need a soak
+test before enabling this by default. The installed legacy C6 advertises HCI
+and initializes its controller itself: `KVM_XBOX_BLE_LEGACY_CP` skips newer
+controller lifecycle RPCs. It must not be blindly enabled on a newer C6 image.
+
+Protocol reference: [ESP32-XboxBLE's discovered Series mapping](https://github.com/rear16/ESP32-XboxBLE#discovered-mapping).
+This implementation uses ESP-IDF's native NimBLE API, not the Arduino library.
+
+### Wired and remote input baseline
+
 Firmware: `2120786`, ESP DEVICE port connected to original Xbox controller
 port 1. Observed through the C790 HDMI capture, not an emulator. Each input
 was sent individually over the existing control WebSocket; held tests refreshed

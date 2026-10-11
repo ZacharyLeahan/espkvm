@@ -22,6 +22,7 @@ static const char *TAG = "usb_xbox";
 static QueueHandle_t s_queue;
 static SemaphoreHandle_t s_input_mu;
 static int64_t s_local_until;
+static int64_t s_bluetooth_until;
 static uint8_t s_port;
 static bool s_open;
 static int64_t s_deadline;
@@ -59,7 +60,7 @@ static void queue_release(void)
 void usb_xbox_release(void)
 {
     if (!s_input_mu || xSemaphoreTake(s_input_mu,pdMS_TO_TICKS(10)) != pdTRUE) return;
-    if (esp_timer_get_time() >= s_local_until) queue_release();
+    if (esp_timer_get_time() >= s_local_until && esp_timer_get_time() >= s_bluetooth_until) queue_release();
     xSemaphoreGive(s_input_mu);
 }
 
@@ -67,7 +68,7 @@ void usb_xbox_keyboard(const uint8_t keys[6])
 {
     if (!s_queue || !keys) return;
     if (xSemaphoreTake(s_input_mu,pdMS_TO_TICKS(10)) != pdTRUE) return;
-    if (esp_timer_get_time() < s_local_until) { xSemaphoreGive(s_input_mu); return; }
+    if (esp_timer_get_time() < s_local_until || esp_timer_get_time() < s_bluetooth_until) { xSemaphoreGive(s_input_mu); return; }
     uint8_t report[20];
     xbox_keyboard_report(keys, report);
     /* Saturation must never lose a release and leave a held button. */
@@ -85,6 +86,17 @@ void usb_xbox_touch(const uint8_t keys[6], const int16_t axes[4], bool active)
     xbox_report_axes(report,axes);
     xQueueReset(s_queue);
     (void)xQueueSend(s_queue,report,0);
+    xSemaphoreGive(s_input_mu);
+}
+
+void usb_xbox_bluetooth(const uint8_t report[20])
+{
+    if (!s_queue || xSemaphoreTake(s_input_mu,pdMS_TO_TICKS(10)) != pdTRUE) return;
+    s_bluetooth_until=report ? esp_timer_get_time()+300000 : 0;
+    if (esp_timer_get_time() >= s_local_until) {
+        if (report) { xQueueReset(s_queue); (void)xQueueSend(s_queue,report,0); }
+        else queue_release();
+    }
     xSemaphoreGive(s_input_mu);
 }
 
