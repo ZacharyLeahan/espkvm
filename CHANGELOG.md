@@ -8,6 +8,11 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Reconnect directly to the encrypted, bonded controller on Bluetooth-mode
+  reentry, rather than requiring a full-name pairing advertisement. Fall back
+  to discovery after a failed direct attempt; recognize the remembered peer
+  without its name. Preserve a reentry request during disconnect completion.
+  Same-boot reconnect testing is pending; reboot persistence is not added.
 - Add bounded Bluetooth link recovery (up to three rescans per local Bluetooth
   session), peer-scoped repeat-pairing repair without a security downgrade, and
   clearer connection/security diagnostics. Trial a six-second supervision

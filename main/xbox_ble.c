@@ -20,7 +20,7 @@
 
 /* Use the installed C6's HCI path; never auto-update its Wi-Fi firmware.
  * Pair only during the explicit local Bluetooth mode, one controller at a time. */
-enum { OFF, STARTING, SCANNING, FOUND, FAILED, TIMEOUT, PAIRING, HID, READY, PAIR_FAILED, ACTIVE, RETRYING };
+enum { OFF, STARTING, SCANNING, FOUND, FAILED, TIMEOUT, PAIRING, HID, READY, PAIR_FAILED, ACTIVE, RETRYING, RECONNECTING };
 static atomic_uint s_state;
 static atomic_bool s_requested, s_synced;
 static atomic_uint s_conn=BLE_HS_CONN_HANDLE_NONE;
@@ -32,9 +32,37 @@ static bool s_discovering;
 static atomic_uint s_notifications,s_valid_reports;
 static atomic_bool s_retry;
 static bool s_repaired_bond;
+static atomic_bool s_direct_connect;
+static portMUX_TYPE s_peer_lock=portMUX_INITIALIZER_UNLOCKED;
+static ble_addr_t s_peer;
+static bool s_have_peer;
 void ble_store_config_init(void);
 static uint8_t s_addr_type;
 static const char *TAG="xbox_ble";
+static bool known_peer(ble_addr_t *peer)
+{
+    portENTER_CRITICAL(&s_peer_lock);
+    bool have=s_have_peer;
+    *peer=s_peer;
+    portEXIT_CRITICAL(&s_peer_lock);
+    return have;
+}
+static int gap_event(struct ble_gap_event *event,void *arg);
+static void start_scan(void)
+{
+    struct ble_gap_disc_params p={.itvl=160,.window=80,.filter_duplicates=1,.passive=0};
+    atomic_store(&s_state,SCANNING);
+    int rc=ble_gap_disc(s_addr_type,30000,&p,gap_event,NULL);
+    ESP_LOGI(TAG,"BLE scan result=%d",rc);
+    if(rc) atomic_store(&s_state,FAILED);
+}
+static int connect_peer(const ble_addr_t *peer)
+{
+    /* Keep 30-50 ms intervals and the tested shared-radio timeout. */
+    struct ble_gap_conn_params p={.scan_itvl=16,.scan_window=16,
+        .itvl_min=24,.itvl_max=40,.supervision_timeout=600};
+    return ble_gap_connect(s_addr_type,peer,10000,&p,gap_event,NULL);
+}
 static void retry_link(int reason)
 {
     if(atomic_load(&s_requested) &&
@@ -47,9 +75,12 @@ const char *xbox_ble_status(void)
 {
     static const char *text[]={"BLUETOOTH IDLE","STARTING BLUETOOTH","SEARCHING: HOLD PAIR",
         "CONNECTING XBOX","BLUETOOTH ERROR - RETRY","NO CONTROLLER - REENTER TO RETRY",
-        "PAIRING XBOX","READING CONTROLLER","CONNECTED - WAITING FOR INPUT","PAIRING REJECTED - RETRY",
-        "CONTROLLER INPUT ACTIVE","LINK LOST - RETRYING"};
-    return text[atomic_load(&s_state)];
+        "SECURING XBOX LINK","READING CONTROLLER","CONNECTED - WAITING FOR INPUT","PAIRING REJECTED - RETRY",
+        "CONTROLLER INPUT ACTIVE","LINK LOST - RETRYING","RECONNECTING - WAKE CONTROLLER"};
+    unsigned state=atomic_load(&s_state);
+    ble_addr_t peer;
+    if(state==SCANNING && known_peer(&peer)) return "SEARCHING - WAKE CONTROLLER";
+    return text[state];
 }
 void xbox_ble_mode(bool pairing) { atomic_store(&s_requested,pairing); }
 static void failed(const char *stage,int rc)
@@ -164,23 +195,30 @@ static int gap_event(struct ble_gap_event *event,void *arg)
     (void)arg;
     if(event->type==BLE_GAP_EVENT_DISC) {
         struct ble_hs_adv_fields fields;
-        if(!ble_hs_adv_parse_fields(&fields,event->disc.data,event->disc.length_data) &&
-           fields.name && fields.name_len==24 && !memcmp(fields.name,"Xbox Wireless Controller",24) &&
-           atomic_load(&s_requested) && atomic_load(&s_state)==SCANNING) {
+        ble_addr_t peer;
+        bool known=known_peer(&peer) && peer.type==event->disc.addr.type &&
+            !memcmp(peer.val,event->disc.addr.val,sizeof(peer.val));
+        bool named=!ble_hs_adv_parse_fields(&fields,event->disc.data,event->disc.length_data) &&
+            fields.name && fields.name_len==24 && !memcmp(fields.name,"Xbox Wireless Controller",24);
+        if((known || named) && atomic_load(&s_requested) && atomic_load(&s_state)==SCANNING) {
             ESP_LOGI(TAG,"Xbox advertisement received, RSSI=%d",event->disc.rssi);
             atomic_store(&s_state,FOUND);
             ble_gap_disc_cancel();
-            /* Keep the existing 30-50 ms interval, but allow more tolerance for
-             * the shared Wi-Fi/BLE radio than the default 2.56 s timeout. */
-            struct ble_gap_conn_params p={.scan_itvl=16,.scan_window=16,
-                .itvl_min=24,.itvl_max=40,.supervision_timeout=600};
-            int rc=ble_gap_connect(s_addr_type,&event->disc.addr,10000,&p,gap_event,NULL);
+            atomic_store(&s_direct_connect,false);
+            int rc=connect_peer(&event->disc.addr);
             if(rc) failed("connect",rc);
         }
     } else if(event->type==BLE_GAP_EVENT_DISC_COMPLETE && atomic_load(&s_state)==SCANNING)
         atomic_store(&s_state,TIMEOUT);
     else if(event->type==BLE_GAP_EVENT_CONNECT) {
+        bool direct=atomic_exchange(&s_direct_connect,false);
         if(event->connect.status) {
+            if(!atomic_load(&s_requested)) return 0;
+            if(direct) {
+                ESP_LOGI(TAG,"Known-peer reconnect result=%d; falling back to discovery",event->connect.status);
+                start_scan();
+                return 0;
+            }
             failed("connection",event->connect.status);
             retry_link(event->connect.status);
             return 0;
@@ -217,6 +255,12 @@ static int gap_event(struct ble_gap_event *event,void *arg)
         }
         if(!s_discovering) {
             ESP_LOGI(TAG,"Encrypted link: key size=%u bonded=%u",desc.sec_state.key_size,desc.sec_state.bonded);
+            if(desc.sec_state.bonded) {
+                portENTER_CRITICAL(&s_peer_lock);
+                s_peer=desc.peer_id_addr;
+                s_have_peer=true;
+                portEXIT_CRITICAL(&s_peer_lock);
+            }
             s_discovering=true; atomic_store(&s_state,HID);
             int rc=ble_gattc_disc_svc_by_uuid(event->enc_change.conn_handle,BLE_UUID16_DECLARE(0x1812),service,NULL);
             if(rc) failed("discover HID",rc);
@@ -278,7 +322,7 @@ static void host_task(void *arg) { (void)arg; nimble_port_run(); nimble_port_fre
 static void worker(void *arg)
 {
     (void)arg;
-    bool attempted=false,was_requested=false;
+    bool attempted=false,was_requested=false,start_pending=false;
     unsigned setup_ticks=0,diagnostic_ticks=0,retry_ticks=0,retries=0;
     for(;;) {
         bool requested=atomic_load(&s_requested);
@@ -314,19 +358,28 @@ static void worker(void *arg)
         if(!requested) {
             atomic_store(&s_retry,false);
             retry_ticks=0; retries=0;
+            start_pending=false;
         } else if(atomic_exchange(&s_retry,false) && retries<3) {
             ++retries; retry_ticks=20;
             atomic_store(&s_state,RETRYING);
             ESP_LOGI(TAG,"Link recovery %u/3 scheduled",retries);
         }
         bool retry_due=retry_ticks && --retry_ticks==0;
-        if(requested && (!was_requested || retry_due) && atomic_load(&s_synced) &&
-           atomic_load(&s_conn)==BLE_HS_CONN_HANDLE_NONE) {
-            struct ble_gap_disc_params p={.itvl=160,.window=80,.filter_duplicates=1,.passive=0};
-            atomic_store(&s_state,SCANNING);
-            int rc=ble_gap_disc(s_addr_type,30000,&p,gap_event,NULL);
-            ESP_LOGI(TAG,"BLE scan result=%d",rc);
-            if(rc) atomic_store(&s_state,FAILED);
+        if(requested && (!was_requested || retry_due)) start_pending=true;
+        /* A fast screen cycle can return before the prior disconnect finishes.
+         * Keep the request pending instead of losing its rising edge. */
+        if(requested && start_pending && atomic_load(&s_synced) &&
+           atomic_load(&s_conn)==BLE_HS_CONN_HANDLE_NONE &&
+           !ble_gap_conn_active() && !ble_gap_disc_active()) {
+            start_pending=false;
+            ble_addr_t peer;
+            if(known_peer(&peer)) {
+                atomic_store(&s_state,RECONNECTING);
+                atomic_store(&s_direct_connect,true);
+                int rc=connect_peer(&peer);
+                ESP_LOGI(TAG,"Known-peer reconnect initiated: %d",rc);
+                if(rc) { atomic_store(&s_direct_connect,false); start_scan(); }
+            } else start_scan();
         }
         if(!requested && was_requested && atomic_load(&s_synced)) {
             ble_gap_disc_cancel();
@@ -341,7 +394,7 @@ static void worker(void *arg)
             diagnostic_ticks=0;
             ESP_LOGI(TAG,"state=%u notifications=%u forwarded=%u",state,atomic_load(&s_notifications),atomic_load(&s_valid_reports));
         }
-        if(state==FOUND || state==PAIRING || state==HID) {
+        if(state==FOUND || state==PAIRING || state==HID || state==RECONNECTING) {
             if(++setup_ticks>=300) { failed("pairing/HID timeout",BLE_HS_ETIMEOUT); setup_ticks=0; }
         } else setup_ticks=0;
         was_requested=requested;

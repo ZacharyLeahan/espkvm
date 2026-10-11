@@ -22,7 +22,12 @@ reports forwarded to the USB input path. Intermediate analog values, long holds,
 reconnect persistence, latency, and long-session stability still need validation.
 Enter the Bluetooth mode and hold the Series
 controller's Pair button until its light flashes rapidly. Leaving that LCD
-mode disconnects and releases inputs; retry by cycling back into it.
+mode disconnects and releases inputs. Reentering first attempts a direct
+connection to the last encrypted, bonded controller remembered during this
+boot; wake it with its Xbox button if needed. After ten seconds without a
+connection, discovery resumes and can recognize that peer without a name in
+its advertisement. Hold Pair only for initial pairing or if reconnect fails.
+This same-boot reconnect path still needs physical validation.
 
 Reconnect recovery is experimental: transient link loss triggers up to three
 rescans, two seconds apart before each scan, within the current Bluetooth mode.
