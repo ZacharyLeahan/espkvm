@@ -36,6 +36,10 @@ controller lifecycle RPCs. It must not be blindly enabled on a newer C6 image.
 
 Protocol reference: [ESP32-XboxBLE's discovered Series mapping](https://github.com/rear16/ESP32-XboxBLE#discovered-mapping).
 This implementation uses ESP-IDF's native NimBLE API, not the Arduino library.
+The first physical pairing attempt connected but was rejected by the controller
+with peer SMP DHKey-check error `0x50B`. The next test matches the reference's
+bonding + MITM-request + Secure Connections flags, with NoInputNoOutput I/O.
+That I/O model still means Just Works pairing, not verified MITM protection.
 
 ### Wired and remote input baseline
 

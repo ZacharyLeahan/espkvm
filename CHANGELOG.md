@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Match the Series BLE reference's pairing auth-request flags after the first
+  controller rejected the DHKey check; show a specific pairing-rejected status.
+  Hardware retry pending, with encrypted Just Works pairing retained.
 - Extend the experimental Bluetooth mode with encrypted Series-controller
   pairing, HID report subscription, and analog XID translation. Host parser
   tests pass; physical pairing/input validation is pending. Disconnect and

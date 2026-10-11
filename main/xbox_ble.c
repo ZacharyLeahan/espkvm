@@ -18,7 +18,7 @@
 
 /* Use the installed C6's HCI path; never auto-update its Wi-Fi firmware.
  * Pair only during the explicit local Bluetooth mode, one controller at a time. */
-enum { OFF, STARTING, SCANNING, FOUND, FAILED, TIMEOUT, PAIRING, HID, READY };
+enum { OFF, STARTING, SCANNING, FOUND, FAILED, TIMEOUT, PAIRING, HID, READY, PAIR_FAILED };
 static atomic_uint s_state;
 static atomic_bool s_requested, s_synced;
 static atomic_uint s_conn=BLE_HS_CONN_HANDLE_NONE;
@@ -33,14 +33,14 @@ const char *xbox_ble_status(void)
 {
     static const char *text[]={"BLUETOOTH IDLE","STARTING BLUETOOTH","SEARCHING: HOLD PAIR",
         "CONNECTING XBOX","BLUETOOTH ERROR - RETRY","NO CONTROLLER - REENTER TO RETRY",
-        "PAIRING XBOX","READING CONTROLLER","CONNECTED - TEST BUTTONS"};
+        "PAIRING XBOX","READING CONTROLLER","CONNECTED - TEST BUTTONS","PAIRING REJECTED - RETRY"};
     return text[atomic_load(&s_state)];
 }
 void xbox_ble_mode(bool pairing) { atomic_store(&s_requested,pairing); }
 static void failed(const char *stage,int rc)
 {
     ESP_LOGW(TAG,"%s failed: %d",stage,rc);
-    atomic_store(&s_state,FAILED);
+    atomic_store(&s_state,rc==BLE_HS_SM_PEER_ERR(BLE_SM_ERR_DHKEY)?PAIR_FAILED:FAILED);
     usb_xbox_bluetooth(NULL);
     unsigned c=atomic_load(&s_conn);
     if(c!=BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(c,BLE_ERR_REM_USER_CONN_TERM);
@@ -164,7 +164,8 @@ static int gap_event(struct ble_gap_event *event,void *arg)
     } else if(event->type==BLE_GAP_EVENT_DISCONNECT) {
         atomic_store(&s_conn,BLE_HS_CONN_HANDLE_NONE);
         usb_xbox_bluetooth(NULL);
-        atomic_store(&s_state,atomic_load(&s_requested)?FAILED:OFF);
+        if(!atomic_load(&s_requested)) atomic_store(&s_state,OFF);
+        else if(atomic_load(&s_state)!=PAIR_FAILED) atomic_store(&s_state,FAILED);
         ESP_LOGI(TAG,"Controller disconnected: %d",event->disconnect.reason);
     }
     return 0;
@@ -206,6 +207,9 @@ static void worker(void *arg)
                 ble_hs_cfg.reset_cb=on_reset;
                 ble_hs_cfg.sm_io_cap=BLE_SM_IO_CAP_NO_IO;
                 ble_hs_cfg.sm_bonding=1;
+                /* Match the Xbox BLE reference's auth-request bits. NoIO still
+                 * negotiates Just Works; this is not a claim of MITM protection. */
+                ble_hs_cfg.sm_mitm=1;
                 ble_hs_cfg.sm_sc=1;
                 ble_hs_cfg.sm_our_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
                 ble_hs_cfg.sm_their_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
