@@ -15,8 +15,12 @@ Gameplay and the subsequent proportional-stick update still need validation.
 
 The fifth LCD mode is opt-in (`KVM_XBOX_BLE`), using NimBLE on the P4 and HCI
 over SDIO through the existing C6. Discovery was confirmed by the operator on
-2026-10-11. Encrypted pairing and forwarding are implemented for testing, not
-yet physically validated. Enter the Bluetooth mode and hold the Series
+2026-10-11. With firmware `f8aec1c`, the operator confirmed all buttons working
+in Xbox Controller Tool on the physical console. Serial evidence also recorded
+a passing DHKey self-test, encrypted 16-byte-key bonding, and 127 valid input
+reports forwarded to the USB input path. Intermediate analog values, long holds,
+reconnect persistence, latency, and long-session stability still need validation.
+Enter the Bluetooth mode and hold the Series
 controller's Pair button until its light flashes rapidly. Leaving that LCD
 mode disconnects and releases inputs; retry by cycling back into it.
 
@@ -52,7 +56,7 @@ selects `BT_NIMBLE_CRYPTO_STACK_MBEDTLS`, retaining LE Secure Connections
 rather than falling back to weaker legacy pairing. A published Bluetooth
 P-256 known-answer test exercises NimBLE's selected backend at HCI sync and
 blocks scanning if it fails. This workaround changes neither the shared SDK
-installation nor the C6 firmware; controller verification is still pending.
+installation nor the C6 firmware; the later combined build passed button testing.
 After this switch, the operator reported `CONNECTED - TEST BUTTONS`, but the
 Series light kept blinking and no Xbox test indicators moved. That status only
 proved encrypted discovery/subscription completed, not usable input. The next
@@ -60,6 +64,11 @@ test reads the HID report map and subscribes to all HID input reports, as the
 reference clients do. Only report ID 1 is translated; other report IDs are
 not treated as gamepad buttons. LCD `CONTROLLER INPUT ACTIVE` now requires a
 valid received gamepad report; periodic logs count notifications and forwards.
+
+Separate unresolved display issue: the operator observed repeated/rolling LCD
+output during this test. The network JPEG was clean, and logs showed two LCD
+initialization timeouts followed by write-only fallback. This is a suspected
+LCD-output initialization/timing fault, not a proven root cause or a fixed issue.
 
 ### Wired and remote input baseline
 

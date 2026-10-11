@@ -8,23 +8,27 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Record operator-confirmed Series Bluetooth button operation on the original
+  Xbox (2026-10-11, `f8aec1c`). Update the README for touchscreen/BLE controls
+  and the separate unresolved rolling-LCD issue. Analog precision, reconnect,
+  long holds, latency, and soak testing remain pending.
 - Read the HID report map and enable every input-report subscription, not only
   report 1. Distinguish connection setup from actual input activity on the LCD
   and log bounded notification diagnostics for the Series controller test.
 - Select NimBLE's mbedTLS backend for Xbox BLE to avoid the ESP-IDF 6.1 P4
   TinyCrypt DHKey regression (esp-hosted-mcu#241). Add a published P-256
-  known-answer test before pairing; physical retry pending.
+  known-answer test before pairing; it passed on the physical device.
 - Test a random-static BLE identity after public-address pairing still failed
   with peer DHKey-check error `0x50B`; identity persistence remains pending.
 - Match the Series BLE reference's pairing auth-request flags after the first
   controller rejected the DHKey check; show a specific pairing-rejected status.
-  Hardware retry pending, with encrypted Just Works pairing retained.
+  That isolated retry failed; encrypted Just Works pairing was retained.
 - Extend the experimental Bluetooth mode with encrypted Series-controller
   pairing, HID report subscription, and analog XID translation. Host parser
-  tests pass; physical pairing/input validation is pending. Disconnect and
+  tests pass; physical button operation subsequently confirmed. Disconnect and
   stale-input safety release controls. Rumble is not implemented.
 - Add opt-in fifth LCD mode for Xbox BLE discovery through the onboard C6.
-  This is a radio diagnostic, not yet pairing or controller-input forwarding.
+  Initially a radio diagnostic, subsequently extended to pairing/input forwarding.
   Keep it disabled by default while validating Wi-Fi/LCD coexistence.
 - Make local touchscreen sticks proportional, with a radial dead zone and
   independent signed XID axes. Preserve button combinations and release safety;

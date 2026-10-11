@@ -13,13 +13,13 @@ development with checks on the actual console; it does not replace an emulator
 or debugger.
 
 - **Works today:** HDMI capture, local touchscreen preview, network viewing,
-  and a [read-only test-evidence collector](docs/XBOX-TESTING.md). Xbox input
-  remains manual.
-- **Next milestone:** prove a real controller button works through the ESP,
-  then demonstrate menu navigation with verified screen changes. Controller
-  emulation, automated deployment/launch, and reliable reset recovery are not
-  implemented. A controller reset combination cannot guarantee recovery from
-  a hard hang.
+  a [read-only test-evidence collector](docs/XBOX-TESTING.md), and experimental
+  original-Xbox USB controller emulation from browser keys, touchscreen controls,
+  or a Bluetooth Series controller. The operator confirmed all Bluetooth buttons
+  working in Xbox Controller Tool on 2026-10-11.
+- **Next milestone:** repeatable automated menu tests and long-session input
+  validation. Automated deployment/launch and reliable reset recovery are not
+  implemented. A controller reset combination cannot recover every hard hang.
 - **Tooling direction:** a small CLI first, agent workflow instructions next,
   and an optional MCP wrapper over the same operations. Tests should use bounded
   button presses, automatic release, fresh-frame checks, timeouts, and recorded
@@ -37,7 +37,8 @@ will be a repeatable real-hardware menu test, not a claim of autonomous debuggin
 - With no remote viewer, resources favor the LCD. Connecting a KVM viewer prioritizes network video and reduces the LCD to **at most 1 fps**; disconnecting restores local performance automatically.
 - A local-only developer strip shows capture freshness, HDMI mode/Hz, LCD updates/sec, and stream-consumer count/priority. Signal loss or stale capture shows a black status slate. Disable `KVM_DSI_STATUS_STRIP` for a clean LCD; browser video stays overlay-free.
 - The **Waveshare 3.5-inch DSI LCD (E)** is not listed as supported/tested by Waveshare's ESP32 driver. We got live HDMI working in this fork and shared our findings on [Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430). This is a community implementation, not official vendor support or a confirmed upstream fix.
-- Tap anywhere to hide/show the local stats (GT911 touch; confirmed working on our hardware). Picture size and letterboxing stay unchanged. The touchscreen Xbox-controller overlay is **not implemented**. Extended soak testing remains to be done.
+- In the Xbox build, tap unused black-bar space to cycle hidden, stats, stats + controller, and controller; enabling Bluetooth adds a fifth pairing/input mode. Touchscreen sticks are proportional. Recording locks the overlay so Stop stays accessible.
+- **Known issue:** intermittent repeated/rolling LCD output remains unresolved. During the reported failure the network frame was clean, while LCD startup used its unverified write-only fallback. Extended soak testing remains to be done.
 
 [LCD setup, timings, and test history](docs/DSI-PREVIEW.md).
 
@@ -49,9 +50,9 @@ will be a repeatable real-hardware menu test, not a claim of autonomous debuggin
 
 Smaller per-connection TCP buffers improved Wi-Fi stability in our test. Longer runs, repeated mode changes, and remote Tailscale performance still need testing. This is not a promise of every resolution/FPS or a proven maximum-performance preset. [Measurements and limitations](docs/XBOX-CAPTURE-DEBUG.md).
 
-**Xbox gamepad emulation is not implemented.** See the [controller proposal](docs/XBOX-REMOTE-CONTROLLER.md).
+**Experimental Xbox controller input works on physical hardware.** See [setup, mappings, validation, and limitations](docs/XBOX-REMOTE-CONTROLLER.md). Bluetooth reconnect persistence and rumble are not implemented.
 
-For homebrew testing, use the [read-only observation helper and regression checklist](docs/XBOX-TESTING.md) to record HDMI mode changes, timestamps and optional screenshots against your build. Controller input remains manual.
+For homebrew testing, use the [read-only observation helper and regression checklist](docs/XBOX-TESTING.md) to record HDMI mode changes, timestamps and optional screenshots against your build. That helper remains observation-only; controller testing is separate.
 
 [microSD recording trial and GIF workflow](docs/SD-RECORDING.md): 480p gameplay
 recorded at about 28 fps with the LCD disabled. A new experimental top-right
