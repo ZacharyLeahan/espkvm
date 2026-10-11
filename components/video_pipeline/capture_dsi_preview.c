@@ -150,8 +150,9 @@ static void touch_task(void *arg)
                     mode = lcd_overlay_after_tap(lcd_ui_stats(mode),record.recording,record.busy) ? LCD_UI_STATS : LCD_UI_NONE;
 #endif
                     atomic_store(&s_ui_mode,mode);
+                    capture_lcd_bt_mode(mode==LCD_UI_BT);
                     menu_gesture = true;
-                    ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad)",mode);
+                    ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad 4=BT)",mode);
                 }
                 if (hit || pad_active) {
                     capture_lcd_pad_keys(keys,axes,hit);
@@ -243,6 +244,7 @@ void capture_dsi_preview_tick(uint32_t completed)
     if ((s_record.recording || s_record.busy) && !lcd_ui_stats(mode)) {
         mode = lcd_ui_pad(mode) ? LCD_UI_BOTH : LCD_UI_STATS;
         atomic_store(&s_ui_mode,mode);
+        capture_lcd_bt_mode(false);
     }
     if (mode != s_draw_mode) {
         s_draw_mode = mode;
@@ -298,6 +300,11 @@ void capture_dsi_preview_tick(uint32_t completed)
             s_record.recording, s_record.busy, s_record.seconds);
 #if CONFIG_KVM_USB_XBOX
         if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
+        if (s_draw_mode==LCD_UI_BT) {
+            lcd_pad_rect(s_fb,32,70,576,76,20);
+            lcd_pad_text(s_fb,44,82,"XBOX BLUETOOTH");
+            lcd_pad_text(s_fb,44,110,capture_lcd_bt_status());
+        }
 #endif
         /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
         s_clear_buffer[s_draw_index] = true;
@@ -1034,6 +1041,11 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
         s_record.recording, s_record.busy, s_record.seconds);
 #if CONFIG_KVM_USB_XBOX
     if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
+    if (s_draw_mode==LCD_UI_BT) {
+        lcd_pad_rect(s_fb,32,70,576,76,20);
+        lcd_pad_text(s_fb,44,82,"XBOX BLUETOOTH");
+        lcd_pad_text(s_fb,44,110,capture_lcd_bt_status());
+    }
 #endif
 #endif
     if (!submit_preview()) return;

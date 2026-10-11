@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 #include "capture_lcd_control.h"
 #include "usb_xbox.h"
+#include "xbox_ble.h"
 
 #include <string.h>
 #include <strings.h>
@@ -657,6 +658,10 @@ void app_main(void)
     }
 #if CONFIG_KVM_USB_XBOX
     capture_lcd_pad_register(usb_xbox_touch);
+#if CONFIG_KVM_XBOX_BLE
+    xbox_ble_init();
+    capture_lcd_bt_register(xbox_ble_mode,xbox_ble_status);
+#endif
 #endif
 
     /*

@@ -4,6 +4,12 @@
 
 static void (*s_get)(capture_lcd_record_state_t *);
 static void (*s_toggle)(void);
+static void (*s_bt_mode)(bool);
+static const char *(*s_bt_status)(void);
+void capture_lcd_bt_register(void (*mode)(bool), const char *(*status)(void))
+{ s_bt_mode=mode; s_bt_status=status; }
+void capture_lcd_bt_mode(bool pairing) { if(s_bt_mode) s_bt_mode(pairing); }
+const char *capture_lcd_bt_status(void) { return s_bt_status?s_bt_status():"BLUETOOTH UNAVAILABLE"; }
 static void (*s_pad)(const uint8_t[6], const int16_t[4], bool);
 void capture_lcd_pad_register(void (*keys)(const uint8_t[6], const int16_t[4], bool)) { s_pad=keys; }
 void capture_lcd_pad_keys(const uint8_t keys[6], const int16_t axes[4], bool active)

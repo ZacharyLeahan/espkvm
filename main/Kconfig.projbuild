@@ -3,6 +3,15 @@ menu "ESP-KVM"
     orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
 
     menu "Features"
+        config KVM_XBOX_BLE
+            bool "Experimental Xbox Bluetooth discovery"
+            depends on KVM_USB_XBOX && BT_NIMBLE_ENABLED && ESP_HOSTED_HOST_FEAT_BT
+            default n
+        config KVM_XBOX_BLE_LEGACY_CP
+            bool "C6 controller already started by legacy firmware"
+            depends on KVM_XBOX_BLE
+            default n
+
         config KVM_USB_XBOX
             bool "Experimental original Xbox XID controller instead of keyboard/mouse"
             default n

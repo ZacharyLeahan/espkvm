@@ -4,8 +4,13 @@
 #include "../components/video_pipeline/lcd_controller.h"
 int main(void)
 {
-    for(unsigned i=0;i<4;i++) {
-        assert(lcd_ui_next(i,false)==(i+1)%4);
+#if CONFIG_KVM_XBOX_BLE
+    const unsigned modes=5;
+#else
+    const unsigned modes=4;
+#endif
+    for(unsigned i=0;i<modes;i++) {
+        assert(lcd_ui_next(i,false)==(i+1)%modes);
         assert(lcd_ui_next(i,true)==i);
     }
     assert(!lcd_ui_stats(0) && lcd_ui_stats(1) && lcd_ui_stats(2) && !lcd_ui_stats(3));

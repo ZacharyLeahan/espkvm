@@ -3,11 +3,17 @@
 #include "lcd_status_strip.h"
 #include <math.h>
 
-enum { LCD_UI_NONE, LCD_UI_STATS, LCD_UI_BOTH, LCD_UI_PAD };
+enum { LCD_UI_NONE, LCD_UI_STATS, LCD_UI_BOTH, LCD_UI_PAD, LCD_UI_BT };
 static inline bool lcd_ui_stats(unsigned mode) { return mode == LCD_UI_STATS || mode == LCD_UI_BOTH; }
 static inline bool lcd_ui_pad(unsigned mode) { return mode == LCD_UI_BOTH || mode == LCD_UI_PAD; }
 static inline unsigned lcd_ui_next(unsigned mode, bool locked)
-{ return locked ? mode : (mode + 1) % 4; }
+{
+#if CONFIG_KVM_XBOX_BLE
+    return locked ? mode : (mode + 1) % 5;
+#else
+    return locked ? mode : (mode + 1) % 4;
+#endif
+}
 static inline bool lcd_ui_bar(unsigned y, unsigned margin)
 { if (margin < 16) margin = 16; return y < margin || (y < 480 && y >= 480-margin); }
 

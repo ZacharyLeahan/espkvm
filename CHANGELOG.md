@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add opt-in fifth LCD mode for Xbox BLE discovery through the onboard C6.
+  This is a radio diagnostic, not yet pairing or controller-input forwarding.
+  Keep it disabled by default while validating Wi-Fi/LCD coexistence.
 - Make local touchscreen sticks proportional, with a radial dead zone and
   independent signed XID axes. Preserve button combinations and release safety;
   network keyboard stick mappings remain full-deflection.
