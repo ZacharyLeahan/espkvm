@@ -1,8 +1,18 @@
 # ESP-KVM for the Original Xbox
 
-This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/espkvm/espkvm)**. View Xbox HDMI on a small local LCD or stream it to a browser over LAN/Tailscale. Code and our recommended configuration live on [`xbox-experiments`](https://github.com/ZacharyLeahan/espkvm/tree/xbox-experiments).
+This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/espkvm/espkvm)**: a small network-connected video capture, touchscreen, recorder, and controller bridge for a real Xbox. The Xbox work is now merged into [`main`](https://github.com/ZacharyLeahan/espkvm/tree/main).
 
-**The local LCD now works: nearly 30 fps (measured 28-29 updates/sec) during a 720p game, visually confirmed smooth and playable on our setup.** The 720p input is scaled to 640×360 on the 640×480 screen; this is not native 720p or 30-fps browser streaming. Latency has not been measured.
+**We can watch the real Xbox, play with a Bluetooth Series controller, and send controller sequences over the network. An agent has successfully triggered kickflips and a kickflip → manual → kickflip sequence on the console, with the player confirming the results.** This is working hardware, not emulation; repeatable autonomous testing is still the goal, not a finished feature.
+
+## What works today
+
+- **Local video:** tested 480p and 720p inputs, with smooth, playable LCD preview. The measured 720p preview reached **28-29 updates/sec**; it is scaled to 640×360 on the 640×480 screen, not native 720p. Browser streaming is slower; see measurements below.
+- **Xbox controller input:** the ESP's DEVICE USB port emulates an original Xbox controller. Browser keys, proportional touchscreen sticks, and a Bluetooth Xbox Series controller can drive it. All Bluetooth buttons were operator-confirmed in Xbox Controller Tool.
+- **Touchscreen UI:** cycle between stats, controller controls, Bluetooth setup, a minimal bottom-edge input-history strip, and a clean screen. Hiding the overlay does not disconnect Bluetooth. History shows ordered presses and chords, rather than just the latest button.
+- **Gameplay recording:** touchscreen Record/Stop, elapsed timer, and microSD video for later MP4/GIF export. A simultaneous 480p trial measured about **26 fps recording and 26-27 LCD updates/sec**, with zero recorder-reported drops in that trial.
+- **Developer/agent access:** LAN/Tailscale viewing, a read-only evidence collector, and bounded network button sequences with automatic release. The trick demos used ad-hoc commands, not a shipped named-macro library or autonomous test runner.
+
+Our three main hardware purchases totaled **$220.03** (ESP board, HDMI capture board, and touchscreen; cable/accessory costs excluded). [Parts and historical prices](#our-hardware) · [Controller setup](docs/XBOX-REMOTE-CONTROLLER.md) · [Recording](docs/SD-RECORDING.md) · [Testing tools](docs/XBOX-TESTING.md).
 
 ## Why this fork
 
@@ -23,7 +33,8 @@ or debugger.
 - **Tooling direction:** a small CLI first, agent workflow instructions next,
   and an optional MCP wrapper over the same operations. Tests should use bounded
   button presses, automatic release, fresh-frame checks, timeouts, and recorded
-  build IDs. This is a roadmap, not an available controller API.
+  build IDs. A unified controller CLI/MCP interface is still a roadmap item;
+  the current input path uses the existing WebSocket transport.
 
 Video and input can remain independent: a future test rig could use direct USB
 HDMI capture for higher-rate observation while keeping the ESP for controller
@@ -38,7 +49,7 @@ will be a repeatable real-hardware menu test, not a claim of autonomous debuggin
 - A local-only developer strip shows capture freshness, HDMI mode/Hz, LCD updates/sec, and stream-consumer count/priority. Signal loss or stale capture shows a black status slate. Disable `KVM_DSI_STATUS_STRIP` for a clean LCD; browser video stays overlay-free.
 - The **Waveshare 3.5-inch DSI LCD (E)** is not listed as supported/tested by Waveshare's ESP32 driver. We got live HDMI working in this fork and shared our findings on [Waveshare issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430). This is a community implementation, not official vendor support or a confirmed upstream fix.
 - In the Xbox build, tap unused black-bar space to cycle hidden, stats, stats + controller, controller, Bluetooth setup, and bottom-edge inputs only (last two require Bluetooth enabled in the build). From setup, one tap leaves just the input strip; another hides everything. Bluetooth stays connected. Setup includes full history, optional timing, and Disconnect. Touchscreen sticks are proportional. Recording keeps Stop accessible.
-- **Known issue:** intermittent repeated/rolling LCD output remains unresolved. During the reported failure the network frame was clean, while LCD startup used its unverified write-only fallback. Extended soak testing remains to be done.
+- **Hardware lesson:** the operator resolved a repeated/rolling LCD image by reseating a loose ribbon. Power off before handling ribbons. This does not establish that every display failure has the same cause; extended soak and hot-plug testing remain to be done.
 
 [LCD setup, timings, and test history](docs/DSI-PREVIEW.md).
 
@@ -50,14 +61,14 @@ will be a repeatable real-hardware menu test, not a claim of autonomous debuggin
 
 Smaller per-connection TCP buffers improved Wi-Fi stability in our test. Longer runs, repeated mode changes, and remote Tailscale performance still need testing. This is not a promise of every resolution/FPS or a proven maximum-performance preset. [Measurements and limitations](docs/XBOX-CAPTURE-DEBUG.md).
 
-**Experimental Xbox controller input works on physical hardware.** See [setup, mappings, validation, and limitations](docs/XBOX-REMOTE-CONTROLLER.md). Bluetooth reconnect persistence and rumble are not implemented.
+**Experimental Xbox controller input works on physical hardware.** See [setup, mappings, validation, and limitations](docs/XBOX-REMOTE-CONTROLLER.md). Same-boot Bluetooth reconnection/retry logic exists but still needs reliability testing; bonds do not survive an ESP reboot. Rumble is not forwarded, and end-to-end latency has not been measured.
 
 For homebrew testing, use the [read-only observation helper and regression checklist](docs/XBOX-TESTING.md) to record HDMI mode changes, timestamps and optional screenshots against your build. That helper remains observation-only; controller testing is separate.
 
-[microSD recording trial and GIF workflow](docs/SD-RECORDING.md): 480p gameplay
-recorded at about 28 fps with the LCD disabled. A new experimental top-right
-LCD Record/Stop control keeps the display enabled using a 720p-max memory
-profile; simultaneous performance is being validated.
+[microSD recording and GIF workflow](docs/SD-RECORDING.md): the touchscreen
+Record/Stop control keeps the LCD enabled using a 720p-max memory profile.
+Simultaneous 480p recording/preview has been tested; simultaneous 720p performance
+and long-session recording still need validation. GIF conversion runs on a computer.
 
 ## Xbox compatibility / recovery
 
@@ -94,6 +105,26 @@ For this exact screen, use the [recommended LCD build](docs/DSI-PREVIEW.md#recom
 **Security:** this experimental profile uses HTTP with no application login. Tailscale secures tailnet traffic, but the local-network interface is still unauthenticated. Use a trusted, restricted LAN and never port-forward it.
 
 ## Credits
+
+This fork builds on substantial existing work. Included software and protocol
+references are different things; these are the projects that helped us get here:
+
+| Repository | Role in this project |
+| --- | --- |
+| [espkvm/espkvm](https://github.com/espkvm/espkvm) | The upstream firmware foundation: capture, networking, web KVM, recording, and USB infrastructure. |
+| [jrowny/p4kvm](https://github.com/jrowny/p4kvm) | Inherited through ESP-KVM: TC358743 bring-up and CSI bridge programming that made capture possible. |
+| [espkvm/console](https://github.com/espkvm/console) and [espkvm/microlink](https://github.com/espkvm/microlink) | Web console and native Tailscale foundations; this tree pins its console and [our microlink fork](https://github.com/ZacharyLeahan/microlink) as submodules. |
+| [Ryzee119/ogx360](https://github.com/Ryzee119/ogx360) and [ogx360_t4](https://github.com/Ryzee119/ogx360_t4) | Original Xbox XID protocol/design references for our independent USB implementation; their implementation code was not incorporated. |
+| [rear16/ESP32-XboxBLE](https://github.com/rear16/ESP32-XboxBLE) and [asukiaaa/esp32-client-for-xbox-controller-with-nim-ble](https://github.com/asukiaaa/esp32-client-for-xbox-controller-with-nim-ble) | Series controller report-mapping and NimBLE client/identity references. |
+| [waveshareteam/Waveshare-ESP32-components](https://github.com/waveshareteam/Waveshare-ESP32-components) | Display-driver comparison and compatibility investigation; we reported our working 3.5-inch E findings in [issue #184](https://github.com/waveshareteam/Waveshare-ESP32-components/issues/184#issuecomment-5973339430). Not a vendor-supported configuration. |
+| [torvalds/linux](https://github.com/torvalds/linux) and [raspberrypi/linux](https://github.com/raspberrypi/linux) | ICN6211 bridge registers, DSI timing, and panel/host behavior references during LCD bring-up. |
+| [espressif/esp-idf](https://github.com/espressif/esp-idf), [esp-hosted-mcu](https://github.com/espressif/esp-hosted-mcu), and [esp-bsp](https://github.com/espressif/esp-bsp) | Platform, C6 connectivity, and GT911 touch reference. [esp-hosted-mcu issue #241](https://github.com/espressif/esp-hosted-mcu/issues/241) informed the BLE pairing crypto fix. |
+
+The fork-specific work ties those foundations together for Xbox: adaptive
+capture/LCD tuning, this panel's bring-up, touchscreen recording and overlays,
+XID output, Bluetooth-to-XID translation, and input history. Detailed provenance
+and testing are in the [controller notes](docs/XBOX-REMOTE-CONTROLLER.md) and
+[LCD investigation](docs/DSI-PREVIEW.md).
 
 We selectively review upstream instead of automatically syncing this specialized fork.
 See the [upstream review ledger](docs/UPSTREAM-REVIEW.md) for decisions, source commits, and links to our adaptations.

@@ -8,6 +8,8 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Refresh the README with the real-Xbox video/input demo, measured recording
+  results, merged-main entry point, and explicit dependency/reference credits.
 - Add an inputs-only LCD mode immediately after Bluetooth setup in the tap
   cycle, followed by fully hidden. A 32-pixel bottom strip shows recent complete
   input events without stats or pairing controls; Bluetooth stays connected.
