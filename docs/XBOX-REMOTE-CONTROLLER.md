@@ -4,8 +4,34 @@ This document records the hardware, software, and code provenance for a local
 ESP-KVM build that is being evaluated as a remotely operated original Xbox
 controller. An opt-in XID firmware implementation is now available for initial
 hardware testing. On 2026-10-11 the real Xbox enumerated it and a 200 ms D-pad
-Down press moved XBMC from Games to Movies. Other controls/gameplay remain
-unverified.
+Down press moved XBMC from Games to Movies. All individual controls were then
+checked in Xbox Controller Tool on physical controller port 1 (see below).
+Gameplay, proportional analog input, and touchscreen controls remain unverified.
+
+## Physical-console validation (2026-10-11)
+
+Firmware: `2120786`, ESP DEVICE port connected to original Xbox controller
+port 1. Observed through the C790 HDMI capture, not an emulator. Each input
+was sent individually over the existing control WebSocket; held tests refreshed
+state every 100 ms and captured a JPEG after about 700 ms, then explicitly
+released it. No firmware changes were needed for these tests.
+
+| Control | Observed in Xbox Controller Tool |
+| --- | --- |
+| A, B, X, Y, Black, White | Corresponding pressure reads 255; others zero |
+| Left/right trigger | Corresponding trigger reads 255; other zero |
+| Left/right stick X and Y, both directions | Correct axis reads +32767 or -32767 |
+| Left/right stick click | Correct thumb indicator highlights |
+| All four D-pad directions | Correct direction highlights |
+| Start and Back, separately | Correct indicator highlights; no page-change chord |
+| Final release | All pressure/axis values zero; no highlighted buttons |
+| No refresh after an A report | Neutral at the approximately 700 ms screenshot, consistent with the 500 ms safety timeout |
+
+A and B also opened and backed out of XBMC's Movies navigation. These tests
+verify individual full-scale inputs, not intermediate pressure/axis values,
+simultaneous chords, long-session reliability, rumble, or gameplay latency.
+Short one-shot presses were not consistently visible during dashboard tests;
+use refreshed held state for reliable testing rather than immediate REST taps.
 
 ## Goal
 
