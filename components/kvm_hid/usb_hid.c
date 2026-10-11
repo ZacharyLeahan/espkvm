@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "usb_hid.h"
+#include "usb_xbox.h"
 
 #include <string.h>
 
@@ -1229,6 +1230,11 @@ void usb_hid_mouse_nudge(int16_t dx, int16_t dy)
 
 void usb_hid_keyboard(uint8_t modifier, const uint8_t keycode[HID_KBD_KEYS])
 {
+#if CONFIG_KVM_USB_XBOX
+    (void)modifier;
+    usb_xbox_keyboard(keycode);
+    return;
+#endif
     if (!keycode) {
         return;
     }
@@ -1250,6 +1256,10 @@ void usb_hid_consumer(uint16_t usage)
 
 void usb_hid_release_all(void)
 {
+#if CONFIG_KVM_USB_XBOX
+    usb_xbox_release();
+    return;
+#endif
     if (!s_hid_q) {
         return;
     }
@@ -1268,6 +1278,11 @@ void usb_hid_release_all(void)
 
 esp_err_t usb_hid_init(void)
 {
+#if CONFIG_KVM_USB_XBOX
+    esp_err_t xbox_err = usb_xbox_init();
+    kvm_cap_report(KVM_CAP_HID, xbox_err == ESP_OK, "Xbox XID startup: %s", esp_err_to_name(xbox_err));
+    return xbox_err;
+#endif
     if (s_hid_q) {
         return ESP_OK;
     }

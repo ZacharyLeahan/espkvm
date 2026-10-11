@@ -8,6 +8,10 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add opt-in original-Xbox XID USB controller bring-up with keyboard-to-button
+  mapping, neutral-input timeout, and host report-encoding tests. Replaces
+  PC USB interfaces only when enabled. Real Xbox enumeration and a 200 ms
+  dashboard D-pad press verified; gameplay/other buttons remain unverified.
 - Add an experimental final LCD startup fallback when bridge readback times
   out, preserving the verified path first and logging DSI failure registers.
   Physical output and HDMI hot-plug recovery still require validation.

@@ -2,8 +2,10 @@
 
 This document records the hardware, software, and code provenance for a local
 ESP-KVM build that is being evaluated as a remotely operated original Xbox
-controller. The Xbox controller feature is a proposal, not an implemented or
-tested feature yet.
+controller. An opt-in XID firmware implementation is now available for initial
+hardware testing. On 2026-10-11 the real Xbox enumerated it and a 200 ms D-pad
+Down press moved XBMC from Games to Movies. Other controls/gameplay remain
+unverified.
 
 ## Goal
 
@@ -26,12 +28,12 @@ mode rather than pretending it is an ordinary keyboard or HID gamepad.
 - Espressif ESP32-P4 Function EV Board
 - Geekworm C790, based on the Toshiba TC358743 HDMI-to-CSI-2 bridge
 - the board's USB-Serial/JTAG port for flashing and diagnostics
-- the board's USB FS device port for target input
+- the board's DEVICE USB port for target input (the existing KVM target port)
 - HDMI from the original Xbox to the C790
 - Wi-Fi with native Tailscale for remote access
 
 The original Xbox controller ports carry USB power and data but use Microsoft's
-proprietary XID device protocol. Connecting the USB FS port to the console will
+proprietary XID device protocol. Connecting the DEVICE port to the console will
 also require an original-Xbox-controller-port adapter or a purpose-built cable.
 The extra Xbox controller-port conductor is not needed for ordinary controller
 input emulation.
@@ -72,14 +74,69 @@ design references only. If implementation code is later adapted, its exact
 source files, commit, license, copyright notice, and modifications must be
 recorded in `NOTICE` before distribution.
 
-## Proposed implementation boundary
+## Implementation boundary
 
-The likely firmware work is a TinyUSB vendor-class XID interface with the
-original Xbox descriptors, control requests, input report, and rumble output
-report. The console work is a gamepad panel that sends complete controller state
-over the existing control WebSocket. A boot-time setting would select either
-the current keyboard/mouse composite device or the Xbox XID device, followed by
-USB re-enumeration.
+### Initial experimental firmware
+
+Enable `CONFIG_KVM_USB_XBOX=y` under ESP-KVM / Features to replace the USB
+keyboard/mouse/storage composite with one original-Xbox XID controller.
+It defaults off. The SD card remains available for local recording, but is not
+exported as USB storage in this mode. Do not connect the Xbox cable to JTAG.
+
+This independent implementation lives in `components/kvm_hid/usb_xbox.c`.
+The wire descriptors, requests, and 20-byte input layout were checked against
+[`ogx360`'s XID reference](https://github.com/Ryzee119/ogx360/blob/master/Firmware/src/usbd/usbd_xid.cpp)
+and its accompanying header. That project is GPL-3.0; its implementation was
+not copied or incorporated. Rumble output is accepted but ignored.
+
+For this first bring-up, the existing keyboard input transport is translated:
+
+| Keyboard input | Xbox control |
+| --- | --- |
+| Arrow keys | D-pad |
+| Enter / Backspace | Start / Back |
+| Z / X / C / V | A / B / X / Y |
+| B / N | Black / White |
+| Q / E | Left / right trigger |
+| WASD / IJKL | Left / right stick |
+| R / T | Left / right stick click |
+
+Buttons/triggers are full pressure and stick directions full deflection; this
+is a bring-up mapping, not a finished gamepad UI. Modifiers and mouse reports
+do nothing. Reports expire to neutral after 500 ms without fresh keyboard
+state, so held keys require refresh; this prevents stale network input from
+holding a control indefinitely. Explicit release and disconnect also clear
+inputs. Keep the Xbox on a safe menu for the first D-pad test.
+
+Host-only encoding test (does not prove USB enumeration):
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -I components/kvm_hid/include \
+  tests/test_xbox_report.c -o /tmp/test_xbox_report
+/tmp/test_xbox_report
+```
+
+Touchscreen/browser controller overlays and proportional analog input are
+next steps after real-console enumeration and button tests succeed.
+
+Bounded button tester (Node 22+, existing authenticated/local control access):
+
+```sh
+node tools/xbox-button.mjs http://esp.local down
+```
+
+Run without arguments for the button names. It sends a 200 ms press and explicit
+release, without taking over another operator's control session. It does not
+bypass device authentication. Successful sending is not proof the console
+acted; verify the picture. The existing REST keyboard tap queues an immediate
+release and was too brief to move XBMC reliably in the first test; use this
+tester instead. Never use this mapping with ordinary keyboard firmware.
+
+The firmware supplies a TinyUSB vendor-class XID interface with original Xbox
+descriptors, control requests, input reports, and ignored rumble output reports.
+Future console work is a gamepad panel that sends complete controller state.
+USB identity currently requires rebuilding with the explicit Kconfig option;
+it is not a runtime setting.
 
 The first milestone is intentionally small: one emulated Controller S in port
 1, digital buttons, sticks, and triggers. Rumble, physical browser Gamepad API

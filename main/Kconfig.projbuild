@@ -3,6 +3,15 @@ menu "ESP-KVM"
     orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
 
     menu "Features"
+        config KVM_USB_XBOX
+            bool "Experimental original Xbox XID controller instead of keyboard/mouse"
+            default n
+            help
+                Replace the USB identity with one Xbox controller. Keyboard
+                input is mapped to controller buttons; mouse/MSC are disabled.
+                Stale state releases after 500 ms. Requires a controller-port
+                cable. Touchscreen controller overlay is not implemented.
+
         comment "Disabled features cost no flash and no RAM."
 
         config KVM_CAPTURE_720P_MAX
