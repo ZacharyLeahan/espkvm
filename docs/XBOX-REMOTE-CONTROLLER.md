@@ -30,6 +30,16 @@ behavior and the original single-event button display with `61c58e0`.
 
 The input-history overlay now shows:
 
+For gameplay, tap unused top/bottom bar space once from Bluetooth setup to show
+**inputs only**: a 32-pixel strip at the very bottom, with recent events such as
+`A > LEFT+X`. No connection panel, stats, or timing controls cover the game.
+Older events are omitted when necessary to fit whole entries on one line.
+Tap again for **fully hidden**. Both modes keep Bluetooth connected. The strip
+overlays the bottom 32 pixels (inside a black bar when one exists); it does not
+shrink or rescale the game. Recording still forces visible recording controls.
+
+The full Bluetooth setup/debug view retains:
+
 - **NOW:** held controls, highlighted, with releases reflected immediately.
 - **Sequence:** eight recent press events, oldest first, e.g. `A > LEFT+X`.
   Repeated reports do not add events. Additive presses within 50 ms group as a

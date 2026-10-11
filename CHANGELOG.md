@@ -8,6 +8,10 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add an inputs-only LCD mode immediately after Bluetooth setup in the tap
+  cycle, followed by fully hidden. A 32-pixel bottom strip shows recent complete
+  input events without stats or pairing controls; Bluetooth stays connected.
+  The strip overlays the bottom edge and does not resize the game image.
 - Replace the single recent-button label with highlighted held controls and
   eight press events observed at USB submission, including remote macros.
   Group quick chords, clear history after three seconds neutral, filter stick

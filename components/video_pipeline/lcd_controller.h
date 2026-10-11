@@ -3,7 +3,7 @@
 #include "lcd_status_strip.h"
 #include <math.h>
 
-enum { LCD_UI_NONE, LCD_UI_STATS, LCD_UI_BOTH, LCD_UI_PAD, LCD_UI_BT };
+enum { LCD_UI_NONE, LCD_UI_STATS, LCD_UI_BOTH, LCD_UI_PAD, LCD_UI_BT, LCD_UI_INPUTS };
 static inline bool lcd_ui_bt_button(unsigned x,unsigned y)
 { return x>=452 && x<608 && y>=76 && y<108; }
 static inline bool lcd_ui_bt_timing(unsigned x,unsigned y)
@@ -13,13 +13,29 @@ static inline bool lcd_ui_pad(unsigned mode) { return mode == LCD_UI_BOTH || mod
 static inline unsigned lcd_ui_next(unsigned mode, bool locked)
 {
 #if CONFIG_KVM_XBOX_BLE
-    return locked ? mode : (mode + 1) % 5;
+    return locked ? mode : (mode + 1) % 6;
 #else
     return locked ? mode : (mode + 1) % 4;
 #endif
 }
 static inline bool lcd_ui_bar(unsigned y, unsigned margin)
 { if (margin < 16) margin = 16; return y < margin || (y < 480 && y >= 480-margin); }
+static inline bool lcd_ui_cycle_hit(unsigned mode,unsigned y,unsigned margin)
+{ return lcd_ui_bar(y,margin) || (mode==LCD_UI_INPUTS && y>=448 && y<480); }
+/* Fit recent complete events in one bottom-edge line; discard oldest events
+ * rather than chopping a button name or shrinking the gameplay image. */
+static inline void lcd_input_recent(const char rows[3][48],char text[51])
+{
+    char joined[144];
+    snprintf(joined,sizeof(joined),"%s%s%s",rows[0],rows[1],rows[2]);
+    const char *start=joined;
+    while(strlen(start)>50) {
+        const char *next=strstr(start," > ");
+        if(!next) break;
+        start=next+3;
+    }
+    snprintf(text,51,"%.50s",start);
+}
 
 typedef struct { unsigned x,y,w,h; uint8_t key; const char *label; } lcd_pad_button_t;
 static const lcd_pad_button_t lcd_pad_buttons[] = {

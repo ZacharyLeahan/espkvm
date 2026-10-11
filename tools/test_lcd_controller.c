@@ -10,7 +10,7 @@ int main(void)
     assert(lcd_ui_bt_timing(320,76) && lcd_ui_bt_timing(443,107));
     assert(!lcd_ui_bt_timing(444,90) && !lcd_ui_bt_timing(320,108));
 #if CONFIG_KVM_XBOX_BLE
-    const unsigned modes=5;
+    const unsigned modes=6;
 #else
     const unsigned modes=4;
 #endif
@@ -18,6 +18,22 @@ int main(void)
         assert(lcd_ui_next(i,false)==(i+1)%modes);
         assert(lcd_ui_next(i,true)==i);
     }
+#if CONFIG_KVM_XBOX_BLE
+    assert(lcd_ui_next(LCD_UI_BT,false)==LCD_UI_INPUTS);
+    assert(lcd_ui_next(LCD_UI_INPUTS,false)==LCD_UI_NONE);
+#endif
+    assert(!lcd_ui_stats(LCD_UI_INPUTS) && !lcd_ui_pad(LCD_UI_INPUTS));
+    assert(lcd_ui_cycle_hit(LCD_UI_INPUTS,448,0));
+    assert(!lcd_ui_cycle_hit(LCD_UI_NONE,448,0));
+    assert(!lcd_ui_cycle_hit(LCD_UI_INPUTS,480,0));
+    char rows[3][48]={"A > LEFT+X","",""},line[51];
+    lcd_input_recent(rows,line); assert(!strcmp(line,"A > LEFT+X"));
+    strcpy(rows[0],"START > LEFT+X > A > RIGHT+B");
+    strcpy(rows[1]," > LB+RB > UP+Y > LEFT+X");
+    strcpy(rows[2]," > DOWN+B");
+    lcd_input_recent(rows,line);
+    assert(strlen(line)<=50 && strstr(line,"DOWN+B") && strncmp(line," > ",3));
+    memset(rows,0,sizeof(rows));lcd_input_recent(rows,line); assert(!line[0]);
     assert(!lcd_ui_stats(0) && lcd_ui_stats(1) && lcd_ui_stats(2) && !lcd_ui_stats(3));
     assert(!lcd_ui_pad(0) && !lcd_ui_pad(1) && lcd_ui_pad(2) && lcd_ui_pad(3));
     assert(lcd_ui_bar(0,60) && lcd_ui_bar(479,60) && !lcd_ui_bar(100,60));

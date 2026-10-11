@@ -98,6 +98,17 @@ static uint16_t s_touch_w = LCD_W, s_touch_h = LCD_H;
 static capture_lcd_record_state_t s_record;
 #if CONFIG_KVM_USB_XBOX
 static atomic_bool s_bt_timing;
+static void draw_input_strip(void)
+{
+    capture_lcd_bt_state_t bt;
+    capture_lcd_bt_state(&bt);
+    char text[51];
+    lcd_input_recent(bt.history,text);
+    /* Also erase expired history in letterbox pixels, which the video blit
+     * does not overwrite. No rescaling or changes to the capture path. */
+    lcd_pad_rect(s_fb,0,448,640,32,12);
+    lcd_pad_text(s_fb,12,457,text);
+}
 static void draw_bt_overlay(void)
 {
     capture_lcd_bt_state_t bt;
@@ -177,7 +188,7 @@ static void touch_task(void *arg)
                     capture_lcd_record_toggle();
                     menu_gesture = true;
                 } else if (press && !hit && count == 1 && x<LCD_W &&
-                           lcd_ui_bar(y,atomic_load(&s_bar_margin))) {
+                           lcd_ui_cycle_hit(mode,y,atomic_load(&s_bar_margin))) {
 #if CONFIG_KVM_USB_XBOX
                     mode = lcd_ui_next(mode,record.recording || record.busy);
 #else
@@ -188,7 +199,7 @@ static void touch_task(void *arg)
                      * must not interrupt physical controller gameplay. */
                     if(mode==LCD_UI_BT) capture_lcd_bt_mode(true);
                     menu_gesture = true;
-                    ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad 4=BT)",mode);
+                    ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad 4=BT 5=inputs)",mode);
                 }
                 if (hit || pad_active) {
                     capture_lcd_pad_keys(keys,axes,hit);
@@ -338,6 +349,7 @@ void capture_dsi_preview_tick(uint32_t completed)
         if (s_draw_mode==LCD_UI_BT) {
             draw_bt_overlay();
         }
+        if (s_draw_mode==LCD_UI_INPUTS) draw_input_strip();
 #endif
         /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
         s_clear_buffer[s_draw_index] = true;
@@ -1077,6 +1089,7 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     if (s_draw_mode==LCD_UI_BT) {
         draw_bt_overlay();
     }
+    if (s_draw_mode==LCD_UI_INPUTS) draw_input_strip();
 #endif
 #endif
     if (!submit_preview()) return;
