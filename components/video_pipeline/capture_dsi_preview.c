@@ -96,6 +96,19 @@ static bool s_show_stats = true;
 static i2c_master_dev_handle_t s_touch;
 static uint16_t s_touch_w = LCD_W, s_touch_h = LCD_H;
 static capture_lcd_record_state_t s_record;
+#if CONFIG_KVM_USB_XBOX
+static void draw_bt_overlay(void)
+{
+    capture_lcd_bt_state_t bt;
+    capture_lcd_bt_state(&bt);
+    lcd_pad_rect(s_fb,32,70,576,108,20);
+    lcd_pad_text(s_fb,44,82,"XBOX BLUETOOTH");
+    lcd_pad_rect(s_fb,452,76,156,32,70);
+    lcd_pad_text(s_fb,464,84,bt.enabled?"DISCONNECT":"CONNECT");
+    lcd_pad_text(s_fb,44,116,bt.enabled?capture_lcd_bt_status():"BLUETOOTH OFF");
+    lcd_pad_text(s_fb,44,148,bt.buttons[0]?bt.buttons:"BUTTONS: -");
+}
+#endif
 
 /* GT911 protocol: Espressif esp-bsp/components/lcd_touch/esp_lcd_touch_gt911.
  * Preserve the panel MCU's reset/configuration; we need only contact presence. */
@@ -138,7 +151,12 @@ static void touch_task(void *arg)
                         hit |= lcd_pad_hit(px*LCD_W/s_touch_w,py*LCD_H/s_touch_h,keys,axes);
                 }
 #endif
-                if (press && !hit && lcd_ui_stats(mode) && record.available &&
+                if (press && !hit && count==1 && mode==LCD_UI_BT && lcd_ui_bt_button(x,y)) {
+                    capture_lcd_bt_state_t bt;
+                    capture_lcd_bt_state(&bt);
+                    capture_lcd_bt_mode(!bt.enabled);
+                    menu_gesture=true;
+                } else if (press && !hit && lcd_ui_stats(mode) && record.available &&
                     lcd_record_hit(x,y,LCD_W,LCD_H)) {
                     capture_lcd_record_toggle();
                     menu_gesture = true;
@@ -150,7 +168,9 @@ static void touch_task(void *arg)
                     mode = lcd_overlay_after_tap(lcd_ui_stats(mode),record.recording,record.busy) ? LCD_UI_STATS : LCD_UI_NONE;
 #endif
                     atomic_store(&s_ui_mode,mode);
-                    capture_lcd_bt_mode(mode==LCD_UI_BT);
+                    /* Display mode is not radio ownership: hiding an overlay
+                     * must not interrupt physical controller gameplay. */
+                    if(mode==LCD_UI_BT) capture_lcd_bt_mode(true);
                     menu_gesture = true;
                     ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad 4=BT)",mode);
                 }
@@ -244,7 +264,6 @@ void capture_dsi_preview_tick(uint32_t completed)
     if ((s_record.recording || s_record.busy) && !lcd_ui_stats(mode)) {
         mode = lcd_ui_pad(mode) ? LCD_UI_BOTH : LCD_UI_STATS;
         atomic_store(&s_ui_mode,mode);
-        capture_lcd_bt_mode(false);
     }
     if (mode != s_draw_mode) {
         s_draw_mode = mode;
@@ -301,9 +320,7 @@ void capture_dsi_preview_tick(uint32_t completed)
 #if CONFIG_KVM_USB_XBOX
         if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
         if (s_draw_mode==LCD_UI_BT) {
-            lcd_pad_rect(s_fb,32,70,576,76,20);
-            lcd_pad_text(s_fb,44,82,"XBOX BLUETOOTH");
-            lcd_pad_text(s_fb,44,110,capture_lcd_bt_status());
+            draw_bt_overlay();
         }
 #endif
         /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
@@ -1042,9 +1059,7 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
 #if CONFIG_KVM_USB_XBOX
     if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
     if (s_draw_mode==LCD_UI_BT) {
-        lcd_pad_rect(s_fb,32,70,576,76,20);
-        lcd_pad_text(s_fb,44,82,"XBOX BLUETOOTH");
-        lcd_pad_text(s_fb,44,110,capture_lcd_bt_status());
+        draw_bt_overlay();
     }
 #endif
 #endif

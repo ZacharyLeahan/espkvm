@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Keep Bluetooth input connected when hiding or cycling the LCD overlay.
+  Add explicit Connect/Disconnect controls and translated button-combination
+  feedback, with an 800 ms display linger. Physical UI verification pending.
 - Reconnect directly to the encrypted, bonded controller on Bluetooth-mode
   reentry, rather than requiring a full-name pairing advertisement. Fall back
   to discovery after a failed direct attempt; recognize the remembered peer

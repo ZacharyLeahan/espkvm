@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_hosted_bt_host_stack.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -36,6 +37,24 @@ static atomic_bool s_direct_connect;
 static portMUX_TYPE s_peer_lock=portMUX_INITIALIZER_UNLOCKED;
 static ble_addr_t s_peer;
 static bool s_have_peer;
+static char s_buttons[48];
+static int64_t s_buttons_us;
+void xbox_ble_ui(capture_lcd_bt_state_t *out)
+{
+    memset(out,0,sizeof(*out));
+    out->enabled=atomic_load(&s_requested);
+    int64_t now=esp_timer_get_time();
+    portENTER_CRITICAL(&s_peer_lock);
+    if(out->enabled && s_buttons_us && now-s_buttons_us<800000)
+        memcpy(out->buttons,s_buttons,sizeof(out->buttons));
+    portEXIT_CRITICAL(&s_peer_lock);
+}
+static void clear_buttons(void)
+{
+    portENTER_CRITICAL(&s_peer_lock);
+    s_buttons_us=0;
+    portEXIT_CRITICAL(&s_peer_lock);
+}
 void ble_store_config_init(void);
 static uint8_t s_addr_type;
 static const char *TAG="xbox_ble";
@@ -82,12 +101,17 @@ const char *xbox_ble_status(void)
     if(state==SCANNING && known_peer(&peer)) return "SEARCHING - WAKE CONTROLLER";
     return text[state];
 }
-void xbox_ble_mode(bool pairing) { atomic_store(&s_requested,pairing); }
+void xbox_ble_mode(bool pairing)
+{
+    atomic_store(&s_requested,pairing);
+    if(!pairing) { clear_buttons(); usb_xbox_bluetooth(NULL); }
+}
 static void failed(const char *stage,int rc)
 {
     ESP_LOGW(TAG,"%s failed: %d",stage,rc);
     atomic_store(&s_state,rc==BLE_HS_SM_PEER_ERR(BLE_SM_ERR_DHKEY)?PAIR_FAILED:FAILED);
     usb_xbox_bluetooth(NULL);
+    clear_buttons();
     unsigned c=atomic_load(&s_conn);
     /* ENC_CHANGE can report ENOTCONN while GAP is delivering a disconnect.
      * Do not issue another HCI disconnect against that vanished connection. */
@@ -277,9 +301,18 @@ static int gap_event(struct ble_gap_event *event,void *arg)
             failed("unsupported report layout",n); return 0;
         }
         usb_xbox_bluetooth(output);
+        char buttons[48]={0};
+        if(xbox_ble_buttons(output,buttons,sizeof(buttons))) {
+            int64_t now=esp_timer_get_time();
+            portENTER_CRITICAL(&s_peer_lock);
+            memcpy(s_buttons,buttons,sizeof(s_buttons));
+            s_buttons_us=now;
+            portEXIT_CRITICAL(&s_peer_lock);
+        }
         if(atomic_fetch_add(&s_valid_reports,1)==0) ESP_LOGI(TAG,"First valid controller input forwarded to USB");
         atomic_store(&s_state,ACTIVE);
     } else if(event->type==BLE_GAP_EVENT_DISCONNECT) {
+        clear_buttons();
         atomic_store(&s_conn,BLE_HS_CONN_HANDLE_NONE);
         usb_xbox_bluetooth(NULL);
         if(!atomic_load(&s_requested)) atomic_store(&s_state,OFF);
@@ -406,6 +439,7 @@ void xbox_ble_init(void)
     if(xTaskCreate(worker,"xbox_ble",6144,NULL,3,NULL)!=pdPASS) atomic_store(&s_state,FAILED);
 }
 #else
+void xbox_ble_ui(capture_lcd_bt_state_t *out) { *out=(capture_lcd_bt_state_t){0}; }
 void xbox_ble_mode(bool pairing) { (void)pairing; }
 const char *xbox_ble_status(void) { return "BLUETOOTH NOT BUILT"; }
 void xbox_ble_init(void) {}

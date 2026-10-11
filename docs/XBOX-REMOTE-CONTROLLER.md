@@ -21,17 +21,24 @@ a passing DHKey self-test, encrypted 16-byte-key bonding, and 127 valid input
 reports forwarded to the USB input path. Intermediate analog values, long holds,
 reconnect persistence, latency, and long-session stability still need validation.
 Enter the Bluetooth mode and hold the Series
-controller's Pair button until its light flashes rapidly. Leaving that LCD
-mode disconnects and releases inputs. Reentering first attempts a direct
-connection to the last encrypted, bonded controller remembered during this
-boot; wake it with its Xbox button if needed. After ten seconds without a
+controller's Pair button until its light flashes rapidly. Once enabled,
+Bluetooth stays active when cycling to hidden, stats, or touchscreen controls;
+hiding the overlay no longer disconnects the controller. In Bluetooth view,
+tap **Disconnect** to explicitly stop Bluetooth and release its inputs, or
+**Connect** to enable it again. Button combinations appear in that overlay and
+linger for 800 ms after their last pressed report so quick taps are readable.
+The labels show translated Xbox inputs; LB/RB keep their Series names.
+
+Enabling Bluetooth again first attempts a direct connection to the last
+encrypted, bonded controller remembered during this boot; wake it with its
+Xbox button if needed. After ten seconds without a
 connection, discovery resumes and can recognize that peer without a name in
 its advertisement. Hold Pair only for initial pairing or if reconnect fails.
 This same-boot reconnect path still needs physical validation.
 
 Reconnect recovery is experimental: transient link loss triggers up to three
-rescans, two seconds apart before each scan, within the current Bluetooth mode.
-Exiting the mode cancels recovery. A peer requesting repeat pairing can replace
+rescans, two seconds apart before each scan, while Bluetooth is enabled.
+Disconnect cancels recovery; changing display modes does not. A peer requesting repeat pairing can replace
 only its own bond once per connection, with Secure Connections and a 16-byte key;
 an authenticated bond cannot be replaced with an unauthenticated one. Bonds
 are not globally cleared. Link timeout tolerance is being tested at six seconds

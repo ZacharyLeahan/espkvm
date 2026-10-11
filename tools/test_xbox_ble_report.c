@@ -4,6 +4,19 @@
 #include "../main/xbox_ble_report.h"
 int main(void)
 {
+    uint8_t buttons[20]={0}; char text[48];
+    assert(!xbox_ble_buttons(buttons,text,sizeof(text)) && !text[0]);
+    buttons[4]=255;
+    assert(xbox_ble_buttons(buttons,text,sizeof(text)) && !strcmp(text,"A"));
+    buttons[2]=4; buttons[4]=0; buttons[6]=255;
+    assert(xbox_ble_buttons(buttons,text,sizeof(text)) && !strcmp(text,"LEFT + X"));
+    buttons[2]=0; buttons[6]=0; buttons[8]=255; buttons[9]=255; buttons[10]=1; buttons[11]=128;
+    assert(xbox_ble_buttons(buttons,text,sizeof(text)) && !strcmp(text,"RB + LB + LT + RT"));
+    memset(buttons,255,sizeof(buttons));
+    assert(xbox_ble_buttons(buttons,text,sizeof(text)) && strlen(text)<sizeof(text));
+    char tiny[2]={1,1};
+    assert(xbox_ble_buttons(buttons,tiny,sizeof(tiny)) && tiny[1]==0);
+    assert(xbox_ble_buttons(buttons,NULL,0));
     uint8_t p[16]={0},o[20];
     for(unsigned i=0;i<4;i++) p[2*i+1]=128;
     assert(xbox_ble_report(p,16,o));

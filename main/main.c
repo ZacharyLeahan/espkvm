@@ -660,7 +660,7 @@ void app_main(void)
     capture_lcd_pad_register(usb_xbox_touch);
 #if CONFIG_KVM_XBOX_BLE
     xbox_ble_init();
-    capture_lcd_bt_register(xbox_ble_mode,xbox_ble_status);
+    capture_lcd_bt_register(xbox_ble_mode,xbox_ble_status,xbox_ble_ui);
 #endif
 #endif
 

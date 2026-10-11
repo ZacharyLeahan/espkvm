@@ -2,7 +2,25 @@
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include "xbox_report.h"
+/* Show translated Xbox buttons (LB/RB retain the Series labels). */
+static inline bool xbox_ble_buttons(const uint8_t p[20],char *text,size_t size)
+{
+    static const char *labels[]={"UP","DOWN","LEFT","RIGHT","START","BACK","L3","R3",
+        "A","B","X","Y","RB","LB","LT","RT"};
+    unsigned mask=p[2];
+    for(unsigned i=0;i<8;i++) if(p[4+i]) mask|=1u<<(8+i);
+    size_t used=0;
+    if(size) text[0]=0;
+    for(unsigned i=0;i<16;i++) if(mask&(1u<<i)) {
+        if(used+1>=size) break;
+        int n=snprintf(text+used,size-used,"%s%s",used?" + ":"",labels[i]);
+        if(n<0 || (size_t)n>=size-used) break;
+        used+=(size_t)n;
+    }
+    return mask!=0;
+}
 /* Series BLE report ID 1, 16-byte payload (ID is in the GATT descriptor).
  * Protocol reference: github.com/rear16/ESP32-XboxBLE, Discovered Mapping.
  * Reject other layouts rather than guessing and sending unintended buttons. */

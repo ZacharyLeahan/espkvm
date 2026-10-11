@@ -4,6 +4,8 @@
 #include <math.h>
 
 enum { LCD_UI_NONE, LCD_UI_STATS, LCD_UI_BOTH, LCD_UI_PAD, LCD_UI_BT };
+static inline bool lcd_ui_bt_button(unsigned x,unsigned y)
+{ return x>=452 && x<608 && y>=76 && y<108; }
 static inline bool lcd_ui_stats(unsigned mode) { return mode == LCD_UI_STATS || mode == LCD_UI_BOTH; }
 static inline bool lcd_ui_pad(unsigned mode) { return mode == LCD_UI_BOTH || mode == LCD_UI_PAD; }
 static inline unsigned lcd_ui_next(unsigned mode, bool locked)
