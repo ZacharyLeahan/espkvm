@@ -6,7 +6,11 @@ menu "ESP-KVM"
         config KVM_XBOX_BLE
             bool "Experimental Xbox Bluetooth discovery"
             depends on KVM_USB_XBOX && BT_NIMBLE_ENABLED && ESP_HOSTED_HOST_FEAT_BT
+            select BT_NIMBLE_CRYPTO_STACK_MBEDTLS
             default n
+            help
+                Use mbedTLS to avoid the IDF 6.1 P4 TinyCrypt DHKey bug
+                documented in espressif/esp-hosted-mcu issue 241.
         config KVM_XBOX_BLE_LEGACY_CP
             bool "C6 controller already started by legacy firmware"
             depends on KVM_XBOX_BLE

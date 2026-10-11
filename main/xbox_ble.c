@@ -13,6 +13,7 @@
 #include "host/ble_sm.h"
 #include "usb_xbox.h"
 #include "xbox_ble_report.h"
+#include "xbox_ble_crypto_test.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -183,6 +184,11 @@ static void on_sync(void)
     }
     if(!rc) rc=ble_hs_id_set_rnd(identity.val);
     s_addr_type=BLE_OWN_ADDR_RANDOM;
+    if(!rc) {
+        bool valid=xbox_ble_crypto_selftest();
+        ESP_LOGI(TAG,"Secure Connections DHKey known-answer test: %s",valid?"PASS":"FAIL");
+        if(!valid) rc=BLE_HS_EUNKNOWN;
+    }
     ESP_LOGI(TAG,"HCI synchronized, random-static address result=%d",rc);
     atomic_store(&s_synced,rc==0);
     if(rc) atomic_store(&s_state,FAILED);

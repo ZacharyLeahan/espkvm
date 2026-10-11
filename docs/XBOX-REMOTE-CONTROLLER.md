@@ -44,6 +44,16 @@ The auth-flag retry also failed with `0x50B`. The next diagnostic uses a
 random-static own address, matching [the original Xbox BLE client reference](https://github.com/asukiaaa/esp32-client-for-xbox-controller-with-nim-ble/blob/master/src/main.cpp).
 This test identity is stable within a boot, not yet persisted across reboots.
 
+Both public and random-static address attempts failed with the same `0x50B`.
+[Espressif issue 241](https://github.com/espressif/esp-hosted-mcu/issues/241)
+documents a matching IDF 6.1 P4 TinyCrypt ECC regression. Our SDK has the
+reported missing `soc/soc_caps.h` include in `ecc_dh.c`. The BLE option now
+selects `BT_NIMBLE_CRYPTO_STACK_MBEDTLS`, retaining LE Secure Connections
+rather than falling back to weaker legacy pairing. A published Bluetooth
+P-256 known-answer test exercises NimBLE's selected backend at HCI sync and
+blocks scanning if it fails. This workaround changes neither the shared SDK
+installation nor the C6 firmware; controller verification is still pending.
+
 ### Wired and remote input baseline
 
 Firmware: `2120786`, ESP DEVICE port connected to original Xbox controller

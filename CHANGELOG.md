@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Select NimBLE's mbedTLS backend for Xbox BLE to avoid the ESP-IDF 6.1 P4
+  TinyCrypt DHKey regression (esp-hosted-mcu#241). Add a published P-256
+  known-answer test before pairing; physical retry pending.
 - Test a random-static BLE identity after public-address pairing still failed
   with peer DHKey-check error `0x50B`; identity persistence remains pending.
 - Match the Series BLE reference's pairing auth-request flags after the first
