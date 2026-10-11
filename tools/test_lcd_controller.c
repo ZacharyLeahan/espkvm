@@ -7,6 +7,8 @@ int main(void)
     assert(lcd_ui_bt_button(452,76) && lcd_ui_bt_button(607,107));
     assert(!lcd_ui_bt_button(451,76) && !lcd_ui_bt_button(608,107));
     assert(!lcd_ui_bt_button(500,75) && !lcd_ui_bt_button(500,108));
+    assert(lcd_ui_bt_timing(320,76) && lcd_ui_bt_timing(443,107));
+    assert(!lcd_ui_bt_timing(444,90) && !lcd_ui_bt_timing(320,108));
 #if CONFIG_KVM_XBOX_BLE
     const unsigned modes=5;
 #else

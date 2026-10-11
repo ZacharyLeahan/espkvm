@@ -6,6 +6,7 @@
 #if CONFIG_KVM_USB_XBOX
 #include "usb_xbox.h"
 #include "xbox_report.h"
+#include "xbox_input_history.h"
 #include "device/usbd_pvt.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
@@ -32,6 +33,23 @@ CFG_TUSB_MEM_SECTION static uint8_t s_tx[64];
 CFG_TUSB_MEM_SECTION static uint8_t s_control[64];
 CFG_TUSB_MEM_SECTION static uint8_t s_out[64];
 static uint32_t s_sent;
+static portMUX_TYPE s_history_lock=portMUX_INITIALIZER_UNLOCKED;
+static xbox_input_history_t s_history;
+void usb_xbox_history(char held[48],char lines[3][48],char timing[48])
+{
+    xbox_input_history_t snapshot;
+    portENTER_CRITICAL(&s_history_lock);
+    snapshot=s_history;
+    portEXIT_CRITICAL(&s_history_lock);
+    xbox_history_format(&snapshot,esp_timer_get_time()/1000,held,lines,timing);
+}
+static void observe_input(const uint8_t report[20])
+{
+    int64_t now=esp_timer_get_time()/1000;
+    portENTER_CRITICAL(&s_history_lock);
+    xbox_history_update(&s_history,report,now);
+    portEXIT_CRITICAL(&s_history_lock);
+}
 
 static const tusb_desc_device_t device = {
     .bLength=18, .bDescriptorType=TUSB_DESC_DEVICE, .bcdUSB=0x0110,
@@ -107,6 +125,7 @@ static void xid_reset(uint8_t port)
     memset(s_state, 0, sizeof(s_state));
     s_state[1] = 20;
     s_deadline = 0;
+    observe_input(s_state);
     if (s_queue) xQueueReset(s_queue);
 }
 static void xid_init(void) { xid_reset(0); }
@@ -177,6 +196,7 @@ static void xid_pump(void *unused)
     if (!s_open || !tud_mounted() || tud_suspended()) {
         usb_xbox_release();
         memset(s_state,0,20); s_state[1]=20;
+        observe_input(s_state);
         return;
     }
     if (!usbd_edpt_claim(s_port,0x81)) return;
@@ -186,6 +206,7 @@ static void xid_pump(void *unused)
     }
     memcpy(s_tx,s_state,20);
     if (!usbd_edpt_xfer(s_port,0x81,s_tx,20,false)) usbd_edpt_release(s_port,0x81);
+    else observe_input(s_state);
 }
 static void xid_worker(void *arg)
 {

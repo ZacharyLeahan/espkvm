@@ -8,6 +8,11 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Replace the single recent-button label with highlighted held controls and
+  eight press events observed at USB submission, including remote macros.
+  Group quick chords, clear history after three seconds neutral, filter stick
+  jitter with hysteresis, and provide optional latest-event hold/gap timings.
+  Host regression tests pass; physical UI verification remains pending.
 - Keep Bluetooth input connected when hiding or cycling the LCD overlay.
   Add explicit Connect/Disconnect controls and translated button-combination
   feedback, with an 800 ms display linger. Physical UI verification pending.

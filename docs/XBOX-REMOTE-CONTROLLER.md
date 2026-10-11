@@ -25,9 +25,27 @@ controller's Pair button until its light flashes rapidly. Once enabled,
 Bluetooth stays active when cycling to hidden, stats, or touchscreen controls;
 hiding the overlay no longer disconnects the controller. In Bluetooth view,
 tap **Disconnect** to explicitly stop Bluetooth and release its inputs, or
-**Connect** to enable it again. Button combinations appear in that overlay and
-linger for 800 ms after their last pressed report so quick taps are readable.
-The labels show translated Xbox inputs; LB/RB keep their Series names.
+**Connect** to enable it again. The operator verified the hide-without-disconnect
+behavior and the original single-event button display with `61c58e0`.
+
+The input-history overlay now shows:
+
+- **NOW:** held controls, highlighted, with releases reflected immediately.
+- **Sequence:** eight recent press events, oldest first, e.g. `A > LEFT+X`.
+  Repeated reports do not add events. Additive presses within 50 ms group as a
+  chord; releases do not create entries. Long combinations abbreviate with `...`.
+- **TIMING:** toggles the latest event's hold duration and preceding neutral
+  gap in milliseconds. These are observed USB-submission timings, not game
+  execution latency or an exact measurement of physical finger timing.
+
+History clears after three seconds neutral; holding a control keeps it visible.
+It observes USB reports after touchscreen/Bluetooth/network priority arbitration,
+so blocked commands do not masquerade as output and remote macros appear too.
+Submission is not proof that a game acted on a report. Stick direction labels
+use 12000-on/8000-off hysteresis without changing the actual analog input.
+LB/RB labels keep their Series names (Black/White on the original Xbox).
+The history/timing implementation passes host regression tests; physical overlay
+verification is pending.
 
 Enabling Bluetooth again first attempts a direct connection to the last
 encrypted, bonded controller remembered during this boot; wake it with its

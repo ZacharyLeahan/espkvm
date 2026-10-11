@@ -97,16 +97,27 @@ static i2c_master_dev_handle_t s_touch;
 static uint16_t s_touch_w = LCD_W, s_touch_h = LCD_H;
 static capture_lcd_record_state_t s_record;
 #if CONFIG_KVM_USB_XBOX
+static atomic_bool s_bt_timing;
 static void draw_bt_overlay(void)
 {
     capture_lcd_bt_state_t bt;
     capture_lcd_bt_state(&bt);
-    lcd_pad_rect(s_fb,32,70,576,108,20);
+    lcd_pad_rect(s_fb,32,70,576,204,20);
     lcd_pad_text(s_fb,44,82,"XBOX BLUETOOTH");
     lcd_pad_rect(s_fb,452,76,156,32,70);
     lcd_pad_text(s_fb,464,84,bt.enabled?"DISCONNECT":"CONNECT");
+    lcd_pad_rect(s_fb,320,76,124,32,atomic_load(&s_bt_timing)?110:45);
+    lcd_pad_text(s_fb,330,84,"TIMING");
     lcd_pad_text(s_fb,44,116,bt.enabled?capture_lcd_bt_status():"BLUETOOTH OFF");
-    lcd_pad_text(s_fb,44,148,bt.buttons[0]?bt.buttons:"BUTTONS: -");
+    lcd_pad_rect(s_fb,40,140,568,24,strcmp(bt.held,"-")?70:20);
+    lcd_pad_text(s_fb,44,146,"NOW");
+    /* Reserve four character columns for NOW; long chords are clipped in a
+     * local copy, never by drawing beyond the framebuffer. */
+    bt.held[42]=0;
+    lcd_pad_text(s_fb,92,146,bt.held);
+    for(unsigned i=0;i<3;i++) lcd_pad_text(s_fb,44,174+20*i,bt.history[i]);
+    if(atomic_load(&s_bt_timing)) lcd_pad_text(s_fb,44,248,bt.timing);
+    else lcd_pad_text(s_fb,44,248,"INPUT HISTORY  OLDEST > NEWEST");
 }
 #endif
 
@@ -151,7 +162,12 @@ static void touch_task(void *arg)
                         hit |= lcd_pad_hit(px*LCD_W/s_touch_w,py*LCD_H/s_touch_h,keys,axes);
                 }
 #endif
-                if (press && !hit && count==1 && mode==LCD_UI_BT && lcd_ui_bt_button(x,y)) {
+                if (press && !hit && count==1 && mode==LCD_UI_BT && lcd_ui_bt_timing(x,y)) {
+#if CONFIG_KVM_USB_XBOX
+                    atomic_store(&s_bt_timing,!atomic_load(&s_bt_timing));
+#endif
+                    menu_gesture=true;
+                } else if (press && !hit && count==1 && mode==LCD_UI_BT && lcd_ui_bt_button(x,y)) {
                     capture_lcd_bt_state_t bt;
                     capture_lcd_bt_state(&bt);
                     capture_lcd_bt_mode(!bt.enabled);

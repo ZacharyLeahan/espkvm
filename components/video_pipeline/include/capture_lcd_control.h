@@ -21,7 +21,10 @@ void capture_lcd_record_toggle(void);
 /* Local pad callback, installed before capture; no USB dependency in video. */
 void capture_lcd_pad_register(void (*keys)(const uint8_t[6], const int16_t[4], bool));
 void capture_lcd_pad_keys(const uint8_t keys[6], const int16_t axes[4], bool active);
-typedef struct { bool enabled; char buttons[48]; } capture_lcd_bt_state_t;
+typedef struct {
+    bool enabled;
+    char held[48],history[3][48],timing[48];
+} capture_lcd_bt_state_t;
 void capture_lcd_bt_register(void (*mode)(bool), const char *(*status)(void),
                             void (*get)(capture_lcd_bt_state_t *));
 void capture_lcd_bt_state(capture_lcd_bt_state_t *out);
