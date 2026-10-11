@@ -53,6 +53,13 @@ rather than falling back to weaker legacy pairing. A published Bluetooth
 P-256 known-answer test exercises NimBLE's selected backend at HCI sync and
 blocks scanning if it fails. This workaround changes neither the shared SDK
 installation nor the C6 firmware; controller verification is still pending.
+After this switch, the operator reported `CONNECTED - TEST BUTTONS`, but the
+Series light kept blinking and no Xbox test indicators moved. That status only
+proved encrypted discovery/subscription completed, not usable input. The next
+test reads the HID report map and subscribes to all HID input reports, as the
+reference clients do. Only report ID 1 is translated; other report IDs are
+not treated as gamepad buttons. LCD `CONTROLLER INPUT ACTIVE` now requires a
+valid received gamepad report; periodic logs count notifications and forwards.
 
 ### Wired and remote input baseline
 

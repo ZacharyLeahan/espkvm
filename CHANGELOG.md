@@ -8,6 +8,9 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Read the HID report map and enable every input-report subscription, not only
+  report 1. Distinguish connection setup from actual input activity on the LCD
+  and log bounded notification diagnostics for the Series controller test.
 - Select NimBLE's mbedTLS backend for Xbox BLE to avoid the ESP-IDF 6.1 P4
   TinyCrypt DHKey regression (esp-hosted-mcu#241). Add a published P-256
   known-answer test before pairing; physical retry pending.
