@@ -35,6 +35,28 @@ use refreshed held state for reliable testing rather than immediate REST taps.
 
 ## Goal
 
+### Experimental LCD controls
+
+In Xbox USB mode, tap unused space in the top or bottom letterbox bar to cycle:
+**hidden -> stats -> stats + controller -> controller -> hidden**.
+Startup remains stats-only. Controller/record-button hits never cycle modes,
+and taps in the game image outside controls do nothing. With no letterbox,
+the outermost 16-pixel top/bottom edges provide the cycle gesture instead.
+
+The controller is drawn over the local picture only, without changing the
+HDMI capture, stream or recording. It has D-pad, A/B/X/Y, Black/White, LT/RT,
+Start/Back, L3/R3 and two virtual stick regions. Multiple touch contacts can
+press controls together (up to six mapped keys). Stick regions have a center
+dead zone and full-deflection directions/diagonals, not proportional travel
+yet. Lift to release. Missing touch reports release local inputs as a safety
+measure; fresh local presses take priority over network keyboard input.
+
+During recording or a start/stop transition, mode cycling is locked so Stop
+cannot disappear. A recording started remotely also reveals stats/Stop.
+The first LCD version needs hands-on touch alignment/hold/release verification;
+host tests cover mode order, recording lock, hitboxes, stick directions and
+framebuffer bounds. Physical USB controls were tested separately above.
+
 Use the existing ESP-KVM video path to view an original Xbox remotely, then use
 the ESP32-P4 USB device port to present a virtual original Xbox controller. The
 web console would gain a phone-friendly gamepad with the original Xbox controls:

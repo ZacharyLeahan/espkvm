@@ -4,4 +4,5 @@
 #include <stdint.h>
 esp_err_t usb_xbox_init(void);
 void usb_xbox_keyboard(const uint8_t keys[6]);
+void usb_xbox_touch(const uint8_t keys[6]);
 void usb_xbox_release(void);

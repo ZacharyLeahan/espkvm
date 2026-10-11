@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "sdkconfig.h"
+#include "capture_lcd_control.h"
+#include "usb_xbox.h"
 
 #include <string.h>
 #include <strings.h>
@@ -653,6 +655,9 @@ void app_main(void)
     } else {
         ESP_LOGI(TAG, "boot: storage skipped (WiFi mode; the co-processor holds the SD slot)");
     }
+#if CONFIG_KVM_USB_XBOX
+    capture_lcd_pad_register(usb_xbox_touch);
+#endif
 
     /*
      * The recovery path first: bring up the network and the web server, then

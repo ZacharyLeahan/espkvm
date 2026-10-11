@@ -8,6 +8,10 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add experimental local Xbox touchscreen controls and a four-mode cycle on
+  unused letterbox space: hidden, stats, stats + controller, controller.
+  Preserve Stop visibility while recording, release stale touch inputs, and
+  give fresh physical touches priority over remote keyboard input.
 - Add opt-in original-Xbox XID USB controller bring-up with keyboard-to-button
   mapping, neutral-input timeout, and host report-encoding tests. Replaces
   PC USB interfaces only when enabled. Real Xbox enumeration and a 200 ms

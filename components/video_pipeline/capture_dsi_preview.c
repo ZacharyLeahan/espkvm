@@ -18,6 +18,7 @@
 #include "lcd_status_strip.h"
 #include "lcd_touch_toggle.h"
 #include "lcd_record_button.h"
+#include "lcd_controller.h"
 #include "capture_lcd_control.h"
 #include "kvm_thermal.h"
 
@@ -88,7 +89,9 @@ static int64_t s_strip_us;
 static int64_t s_idle_us;
 static uint32_t s_lcd_updates;
 static unsigned s_lcd_fps10;
-static atomic_bool s_stats_visible = true;
+static atomic_uint s_ui_mode = LCD_UI_STATS;
+static atomic_uint s_bar_margin = 16;
+static unsigned s_draw_mode = LCD_UI_STATS;
 static bool s_show_stats = true;
 static i2c_master_dev_handle_t s_touch;
 static uint16_t s_touch_w = LCD_W, s_touch_h = LCD_H;
@@ -101,6 +104,8 @@ static void touch_task(void *arg)
     (void)arg;
     lcd_touch_toggle_t gesture = {0};
     unsigned errors = 0;
+    bool pad_active = false, menu_gesture = false;
+    int64_t pad_seen = 0;
     for (;;) {
         const uint8_t reg[] = {0x81, 0x4e};
         uint8_t report[41];
@@ -109,27 +114,56 @@ static void touch_task(void *arg)
         if (err == ESP_OK && (report[0] & 0x80)) {
             const uint8_t ack[] = {0x81, 0x4e, 0};
             err = i2c_master_transmit(s_touch, ack, sizeof(ack), 20);
-            if (err == ESP_OK && lcd_touch_toggle_event(&gesture, report[0], esp_timer_get_time())) {
+            if (err == ESP_OK) {
+                int64_t now = esp_timer_get_time();
+                unsigned count = report[0] & 15;
+                bool press = lcd_touch_toggle_event(&gesture, report[0], now);
+                if (!count) menu_gesture = false;
+                if (count > 5) count = 0;
                 unsigned raw_x = report[2] | ((unsigned)report[3] << 8);
                 unsigned raw_y = report[4] | ((unsigned)report[5] << 8);
-                if (raw_x >= s_touch_w || raw_y >= s_touch_h) continue;
                 unsigned x = raw_x * LCD_W / s_touch_w;
                 unsigned y = raw_y * LCD_H / s_touch_h;
-                ESP_LOGI(TAG, "touch: raw %u,%u mapped %u,%u", raw_x, raw_y, x, y);
                 capture_lcd_record_state_t record;
                 capture_lcd_record_state(&record);
-                /* Hidden controls must not react: any tap first reveals the
-                 * whole overlay, without accidentally starting/stopping SD. */
-                if (atomic_load(&s_stats_visible) && record.available &&
-                    lcd_record_hit(x, y, LCD_W, LCD_H)) {
+                unsigned mode = atomic_load(&s_ui_mode);
+                uint8_t keys[6] = {0};
+                bool hit = false;
+#if CONFIG_KVM_USB_XBOX
+                if (lcd_ui_pad(mode) && !menu_gesture) for (unsigned i=0;i<count;i++) {
+                    unsigned px=report[2+8*i] | ((unsigned)report[3+8*i]<<8);
+                    unsigned py=report[4+8*i] | ((unsigned)report[5+8*i]<<8);
+                    if(px<s_touch_w && py<s_touch_h)
+                        hit |= lcd_pad_hit(px*LCD_W/s_touch_w,py*LCD_H/s_touch_h,keys);
+                }
+#endif
+                if (press && !hit && lcd_ui_stats(mode) && record.available &&
+                    lcd_record_hit(x,y,LCD_W,LCD_H)) {
                     capture_lcd_record_toggle();
-                } else {
-                    bool visible = lcd_overlay_after_tap(atomic_load(&s_stats_visible),
-                                                         record.recording, record.busy);
-                    atomic_store(&s_stats_visible, visible);
-                    ESP_LOGI(TAG, "touch: LCD overlay %s", visible ? "shown" : "hidden");
+                    menu_gesture = true;
+                } else if (press && !hit && count == 1 && x<LCD_W &&
+                           lcd_ui_bar(y,atomic_load(&s_bar_margin))) {
+#if CONFIG_KVM_USB_XBOX
+                    mode = lcd_ui_next(mode,record.recording || record.busy);
+#else
+                    mode = lcd_overlay_after_tap(lcd_ui_stats(mode),record.recording,record.busy) ? LCD_UI_STATS : LCD_UI_NONE;
+#endif
+                    atomic_store(&s_ui_mode,mode);
+                    menu_gesture = true;
+                    ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad)",mode);
+                }
+                if (hit || pad_active) {
+                    capture_lcd_pad_keys(keys);
+                    pad_active = hit;
+                    pad_seen = now;
                 }
             }
+        }
+        /* Lost touch reports must not leave a virtual control held. */
+        if (pad_active && (err != ESP_OK || esp_timer_get_time()-pad_seen > 250000)) {
+            const uint8_t neutral[6] = {0};
+            capture_lcd_pad_keys(neutral);
+            pad_active = false;
         }
         if (err != ESP_OK) {
             if (++errors == 10) {
@@ -203,10 +237,14 @@ void capture_dsi_preview_tick(uint32_t completed)
     if (!s_fb) return;
     capture_lcd_record_state(&s_record);
     /* Also reveal controls if recording was started remotely while hidden. */
-    if (s_record.recording || s_record.busy) atomic_store(&s_stats_visible, true);
-    const bool show = atomic_load(&s_stats_visible);
-    if (show != s_show_stats) {
-        s_show_stats = show;
+    unsigned mode = atomic_load(&s_ui_mode);
+    if ((s_record.recording || s_record.busy) && !lcd_ui_stats(mode)) {
+        mode = lcd_ui_pad(mode) ? LCD_UI_BOTH : LCD_UI_STATS;
+        atomic_store(&s_ui_mode,mode);
+    }
+    if (mode != s_draw_mode) {
+        s_draw_mode = mode;
+        s_show_stats = lcd_ui_stats(mode);
         /* Erase the previous glyphs in ALL ring buffers, including letterbox. */
         for (unsigned i = 0; i < LCD_BUFFERS; ++i) s_clear_buffer[i] = true;
     }
@@ -256,6 +294,9 @@ void capture_dsi_preview_tick(uint32_t completed)
         if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
         if (s_show_stats && s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
             s_record.recording, s_record.busy, s_record.seconds);
+#if CONFIG_KVM_USB_XBOX
+        if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
+#endif
         /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
         s_clear_buffer[s_draw_index] = true;
         submit_preview();
@@ -944,6 +985,9 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     }
     const uint32_t x0 = (LCD_W - out_w) / 2u;
     const uint32_t y0 = (LCD_H - out_h) / 2u;
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    atomic_store(&s_bar_margin,y0);
+#endif
     if (width != s_last_w || height != s_last_h) {
         for (unsigned i = 0; i < LCD_BUFFERS; ++i) {
             s_clear_buffer[i] = true;
@@ -986,6 +1030,9 @@ void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
     if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
     if (s_show_stats && s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
         s_record.recording, s_record.busy, s_record.seconds);
+#if CONFIG_KVM_USB_XBOX
+    if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
+#endif
 #endif
     if (!submit_preview()) return;
 #if CONFIG_KVM_DSI_STATUS_STRIP

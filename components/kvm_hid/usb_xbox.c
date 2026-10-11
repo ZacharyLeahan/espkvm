@@ -15,10 +15,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "soc/usb_dwc_struct.h"
 
 static const char *TAG = "usb_xbox";
 static QueueHandle_t s_queue;
+static SemaphoreHandle_t s_input_mu;
+static int64_t s_local_until;
 static uint8_t s_port;
 static bool s_open;
 static int64_t s_deadline;
@@ -45,7 +48,7 @@ static const uint8_t xid_descriptor[16] = {
     16,0x42,0,1,1,2,20,6,255,255,255,255,255,255,255,255
 };
 
-void usb_xbox_release(void)
+static void queue_release(void)
 {
     if (!s_queue) return;
     uint8_t neutral[20] = {0,20};
@@ -53,13 +56,37 @@ void usb_xbox_release(void)
     (void)xQueueSend(s_queue, neutral, 0);
 }
 
+void usb_xbox_release(void)
+{
+    if (!s_input_mu || xSemaphoreTake(s_input_mu,pdMS_TO_TICKS(10)) != pdTRUE) return;
+    if (esp_timer_get_time() >= s_local_until) queue_release();
+    xSemaphoreGive(s_input_mu);
+}
+
 void usb_xbox_keyboard(const uint8_t keys[6])
 {
     if (!s_queue || !keys) return;
+    if (xSemaphoreTake(s_input_mu,pdMS_TO_TICKS(10)) != pdTRUE) return;
+    if (esp_timer_get_time() < s_local_until) { xSemaphoreGive(s_input_mu); return; }
     uint8_t report[20];
     xbox_keyboard_report(keys, report);
     /* Saturation must never lose a release and leave a held button. */
-    if (xQueueSend(s_queue, report, 0) != pdTRUE) usb_xbox_release();
+    if (xQueueSend(s_queue, report, 0) != pdTRUE) queue_release();
+    xSemaphoreGive(s_input_mu);
+}
+
+/* Physical touch has priority while fresh; never mix local and remote states. */
+void usb_xbox_touch(const uint8_t keys[6])
+{
+    if (!s_queue || !keys || xSemaphoreTake(s_input_mu,pdMS_TO_TICKS(10)) != pdTRUE) return;
+    bool held=false;
+    for(unsigned i=0;i<6;i++) held |= keys[i] != 0;
+    s_local_until=held ? esp_timer_get_time()+300000 : 0;
+    uint8_t report[20];
+    xbox_keyboard_report(keys,report);
+    xQueueReset(s_queue);
+    (void)xQueueSend(s_queue,report,0);
+    xSemaphoreGive(s_input_mu);
 }
 
 static void xid_reset(uint8_t port)
@@ -165,6 +192,8 @@ esp_err_t usb_xbox_init(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
     s_queue=xQueueCreate(16,20);
     if (!s_queue) return ESP_ERR_NO_MEM;
+    s_input_mu=xSemaphoreCreateMutex();
+    if (!s_input_mu) return ESP_ERR_NO_MEM;
     tinyusb_config_t cfg=TINYUSB_DEFAULT_CONFIG();
     cfg.descriptor.device=&device;
     cfg.descriptor.full_speed_config=configuration;
