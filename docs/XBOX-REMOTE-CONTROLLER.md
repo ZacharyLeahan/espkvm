@@ -30,8 +30,15 @@ Exiting the mode cancels recovery. A peer requesting repeat pairing can replace
 only its own bond once per connection, with Secure Connections and a 16-byte key;
 an authenticated bond cannot be replaced with an unauthenticated one. Bonds
 are not globally cleared. Link timeout tolerance is being tested at six seconds
-(previously 2.56 seconds); USB's stale-input release remains 500 ms. This has not
-yet been demonstrated to fix the observed reconnect failure.
+(previously 2.56 seconds); USB's stale-input release remains 500 ms.
+
+On 2026-10-11, the operator confirmed that the recovery build `371e4b8`
+worked after flashing and pairing again. Serial logs showed a passing DHKey
+self-test, encrypted bonding with a 16-byte key, and 58 valid reports forwarded
+to USB. LCD updates remained approximately 29-30 fps. That attempt succeeded
+without automatic retry or bond replacement, so it does not establish which
+change restored operation. Repeated mode-exit/reentry and controller power-cycle
+tests are still needed to validate reconnect reliability.
 
 Only the `Xbox Wireless Controller` advertisement and HID input report ID 1
 with a 16-byte payload are accepted. Sticks remain proportional; 10-bit
