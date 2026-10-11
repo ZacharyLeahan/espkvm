@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: Apache-2.0
+# Compatibility overlay: the recommended live profile now already selects three.
+CONFIG_KVM_DSI_PREVIEW_BUFFERS=3

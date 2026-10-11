@@ -1,0 +1,1128 @@
+/*
+ * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Experimental, local-only preview for the Waveshare 3.5inch DSI LCD (E).
+ * The panel's Raspberry Pi overlay describes a generic one-lane RGB888 DSI
+ * video sink at 640x480 with a 24 MHz pixel clock. Its timing is not the HDMI
+ * timing: every captured mode is fitted into this fixed 640x480 framebuffer.
+ *
+ * The CSI task calls this only while it holds a completed source buffer. A
+ * viewer-aware budget gives the local panel spare time without competing
+ * with remote encoding; codec selection and viewer accounting are unchanged.
+ */
+#include "capture_priv.h"
+#include "capture.h"
+#include "lcd_rgb_half.h"
+#include "lcd_rgb_9to8.h"
+#include "lcd_status_strip.h"
+#include "lcd_touch_toggle.h"
+#include "lcd_record_button.h"
+#include "lcd_controller.h"
+#include "capture_lcd_control.h"
+#include "kvm_thermal.h"
+
+#include <string.h>
+#include <stdio.h>
+#include <stdatomic.h>
+
+#include "esp_cache.h"
+#include "esp_check.h"
+#include "esp_ldo_regulator.h"
+#include "esp_lcd_mipi_dsi.h"
+#include "esp_lcd_panel_commands.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "driver/i2c_master.h"
+#include "driver/ppa.h"
+#include "hal/mipi_dsi_host_ll.h"
+#include "hal/mipi_dsi_brg_ll.h"
+#include "esp_task_wdt.h"
+#include "soc/mipi_dsi_host_struct.h"
+#include "soc/mipi_dsi_bridge_struct.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#if CONFIG_KVM_DSI_PREVIEW
+
+#define TAG "dsi_preview"
+#define LCD_W 640u
+#define LCD_H 480u
+#define LCD_FB_BYTES (LCD_W * LCD_H * 3u)
+#define LCD_BUFFERS CONFIG_KVM_DSI_PREVIEW_BUFFERS
+#define PREVIEW_LOCAL_FPS 60
+#define PREVIEW_REMOTE_FPS 1
+#define ICN_READ_TIMEOUT_US 100000
+
+static esp_ldo_channel_handle_t s_phy_power;
+static i2c_master_dev_handle_t s_ws_control;
+static esp_lcd_dsi_bus_handle_t s_bus;
+static esp_lcd_panel_io_handle_t s_dbi_io;
+static esp_lcd_panel_handle_t s_panel;
+static uint8_t *s_fb;
+static uint8_t *s_buffers[LCD_BUFFERS];
+static unsigned s_draw_index;
+static unsigned s_submitted_index;
+static bool s_clear_buffer[LCD_BUFFERS];
+static uint32_t s_reuse_after[LCD_BUFFERS];
+static int64_t s_last_frame_us;
+static int64_t s_last_cost_us;
+static bool s_last_fast_path;
+static int s_last_priority = -1;
+static uint32_t s_source_x[LCD_W];
+static ppa_client_handle_t s_scaler;
+static bool s_scaler_failed;
+static uint32_t s_last_w;
+static uint32_t s_last_h;
+static uint32_t s_frames;
+static int64_t s_report_us;
+static bool s_link_logged;
+static volatile uint32_t s_dma_frames;
+static volatile int s_dma_core = -1;
+#if CONFIG_KVM_DSI_STATUS_STRIP
+static char s_strip[80];
+static uint32_t s_seen_completed;
+static int64_t s_fresh_us;
+static int64_t s_strip_us;
+static int64_t s_idle_us;
+static uint32_t s_lcd_updates;
+static unsigned s_lcd_fps10;
+static atomic_uint s_ui_mode = LCD_UI_STATS;
+static atomic_uint s_bar_margin = 16;
+static unsigned s_draw_mode = LCD_UI_STATS;
+static bool s_show_stats = true;
+static i2c_master_dev_handle_t s_touch;
+static uint16_t s_touch_w = LCD_W, s_touch_h = LCD_H;
+static capture_lcd_record_state_t s_record;
+#if CONFIG_KVM_USB_XBOX
+static atomic_bool s_bt_timing;
+static void draw_input_strip(void)
+{
+    capture_lcd_bt_state_t bt;
+    capture_lcd_bt_state(&bt);
+    char text[51];
+    lcd_input_recent(bt.history,text);
+    /* Also erase expired history in letterbox pixels, which the video blit
+     * does not overwrite. No rescaling or changes to the capture path. */
+    lcd_pad_rect(s_fb,0,448,640,32,12);
+    lcd_pad_text(s_fb,12,457,text);
+}
+static void draw_bt_overlay(void)
+{
+    capture_lcd_bt_state_t bt;
+    capture_lcd_bt_state(&bt);
+    lcd_pad_rect(s_fb,32,70,576,204,20);
+    lcd_pad_text(s_fb,44,82,"XBOX BLUETOOTH");
+    lcd_pad_rect(s_fb,452,76,156,32,70);
+    lcd_pad_text(s_fb,464,84,bt.enabled?"DISCONNECT":"CONNECT");
+    lcd_pad_rect(s_fb,320,76,124,32,atomic_load(&s_bt_timing)?110:45);
+    lcd_pad_text(s_fb,330,84,"TIMING");
+    lcd_pad_text(s_fb,44,116,bt.enabled?capture_lcd_bt_status():"BLUETOOTH OFF");
+    lcd_pad_rect(s_fb,40,140,568,24,strcmp(bt.held,"-")?70:20);
+    lcd_pad_text(s_fb,44,146,"NOW");
+    /* Reserve four character columns for NOW; long chords are clipped in a
+     * local copy, never by drawing beyond the framebuffer. */
+    bt.held[42]=0;
+    lcd_pad_text(s_fb,92,146,bt.held);
+    for(unsigned i=0;i<3;i++) lcd_pad_text(s_fb,44,174+20*i,bt.history[i]);
+    if(atomic_load(&s_bt_timing)) lcd_pad_text(s_fb,44,248,bt.timing);
+    else lcd_pad_text(s_fb,44,248,"INPUT HISTORY  OLDEST > NEWEST");
+}
+#endif
+
+/* GT911 protocol: Espressif esp-bsp/components/lcd_touch/esp_lcd_touch_gt911.
+ * Preserve the panel MCU's reset/configuration; we need only contact presence. */
+static void touch_task(void *arg)
+{
+    (void)arg;
+    lcd_touch_toggle_t gesture = {0};
+    unsigned errors = 0;
+    bool pad_active = false, menu_gesture = false;
+    int64_t pad_seen = 0;
+    for (;;) {
+        const uint8_t reg[] = {0x81, 0x4e};
+        uint8_t report[41];
+        esp_err_t err = i2c_master_transmit_receive(s_touch, reg, sizeof(reg),
+                                                  report, sizeof(report), 20);
+        if (err == ESP_OK && (report[0] & 0x80)) {
+            const uint8_t ack[] = {0x81, 0x4e, 0};
+            err = i2c_master_transmit(s_touch, ack, sizeof(ack), 20);
+            if (err == ESP_OK) {
+                int64_t now = esp_timer_get_time();
+                unsigned count = report[0] & 15;
+                bool press = lcd_touch_toggle_event(&gesture, report[0], now);
+                if (!count) menu_gesture = false;
+                if (count > 5) count = 0;
+                unsigned raw_x = report[2] | ((unsigned)report[3] << 8);
+                unsigned raw_y = report[4] | ((unsigned)report[5] << 8);
+                unsigned x = raw_x * LCD_W / s_touch_w;
+                unsigned y = raw_y * LCD_H / s_touch_h;
+                capture_lcd_record_state_t record;
+                capture_lcd_record_state(&record);
+                unsigned mode = atomic_load(&s_ui_mode);
+                uint8_t keys[6] = {0};
+                int16_t axes[4] = {0};
+                bool hit = false;
+#if CONFIG_KVM_USB_XBOX
+                if (lcd_ui_pad(mode) && !menu_gesture) for (unsigned i=0;i<count;i++) {
+                    unsigned px=report[2+8*i] | ((unsigned)report[3+8*i]<<8);
+                    unsigned py=report[4+8*i] | ((unsigned)report[5+8*i]<<8);
+                    if(px<s_touch_w && py<s_touch_h)
+                        hit |= lcd_pad_hit(px*LCD_W/s_touch_w,py*LCD_H/s_touch_h,keys,axes);
+                }
+#endif
+                if (press && !hit && count==1 && mode==LCD_UI_BT && lcd_ui_bt_timing(x,y)) {
+#if CONFIG_KVM_USB_XBOX
+                    atomic_store(&s_bt_timing,!atomic_load(&s_bt_timing));
+#endif
+                    menu_gesture=true;
+                } else if (press && !hit && count==1 && mode==LCD_UI_BT && lcd_ui_bt_button(x,y)) {
+                    capture_lcd_bt_state_t bt;
+                    capture_lcd_bt_state(&bt);
+                    capture_lcd_bt_mode(!bt.enabled);
+                    menu_gesture=true;
+                } else if (press && !hit && lcd_ui_stats(mode) && record.available &&
+                    lcd_record_hit(x,y,LCD_W,LCD_H)) {
+                    capture_lcd_record_toggle();
+                    menu_gesture = true;
+                } else if (press && !hit && count == 1 && x<LCD_W &&
+                           lcd_ui_cycle_hit(mode,y,atomic_load(&s_bar_margin))) {
+#if CONFIG_KVM_USB_XBOX
+                    mode = lcd_ui_next(mode,record.recording || record.busy);
+#else
+                    mode = lcd_overlay_after_tap(lcd_ui_stats(mode),record.recording,record.busy) ? LCD_UI_STATS : LCD_UI_NONE;
+#endif
+                    atomic_store(&s_ui_mode,mode);
+                    /* Display mode is not radio ownership: hiding an overlay
+                     * must not interrupt physical controller gameplay. */
+                    if(mode==LCD_UI_BT) capture_lcd_bt_mode(true);
+                    menu_gesture = true;
+                    ESP_LOGI(TAG,"touch: LCD mode %u (0=none 1=stats 2=both 3=pad 4=BT 5=inputs)",mode);
+                }
+                if (hit || pad_active) {
+                    capture_lcd_pad_keys(keys,axes,hit);
+                    pad_active = hit;
+                    pad_seen = now;
+                }
+            }
+        }
+        /* Lost touch reports must not leave a virtual control held. */
+        if (pad_active && (err != ESP_OK || esp_timer_get_time()-pad_seen > 250000)) {
+            const uint8_t neutral[6] = {0};
+            const int16_t centered[4] = {0};
+            capture_lcd_pad_keys(neutral,centered,false);
+            pad_active = false;
+        }
+        if (err != ESP_OK) {
+            if (++errors == 10) {
+                ESP_LOGW(TAG, "touch polling stopped after repeated I2C errors; video continues");
+                vTaskDelete(NULL);
+                return;
+            }
+        } else errors = 0;
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
+
+static void touch_init(void)
+{
+    i2c_master_bus_handle_t bus = capture_i2c_bus();
+    if (!bus) return;
+    const uint8_t addresses[] = {0x5d, 0x14};
+    for (unsigned i = 0; i < sizeof(addresses); ++i) {
+        if (i2c_master_probe(bus, addresses[i], 20) != ESP_OK) continue;
+        const i2c_device_config_t cfg = {.dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = addresses[i], .scl_speed_hz = 100000};
+        if (i2c_master_bus_add_device(bus, &cfg, &s_touch) != ESP_OK) continue;
+        const uint8_t reg[] = {0x81, 0x40};
+        uint8_t id[4] = {0};
+        esp_err_t err = i2c_master_transmit_receive(s_touch, reg, sizeof(reg), id, sizeof(id), 20);
+        if (err == ESP_OK && !memcmp(id, "911", 3)) {
+            const uint8_t size_reg[] = {0x80, 0x48};
+            uint8_t size[4];
+            if (i2c_master_transmit_receive(s_touch, size_reg, 2, size, 4, 20) == ESP_OK) {
+                unsigned w = size[0] | ((unsigned)size[1] << 8);
+                unsigned h = size[2] | ((unsigned)size[3] << 8);
+                if (w && h) { s_touch_w = w; s_touch_h = h; }
+            }
+            ESP_LOGI(TAG, "GT911 coordinate range: %ux%u", s_touch_w, s_touch_h);
+            if (xTaskCreate(touch_task, "lcd_touch", 3072, NULL, 2, NULL) == pdPASS) {
+                ESP_LOGI(TAG, "GT911 touch ready at 0x%02x: tap to toggle stats", addresses[i]);
+                return;
+            }
+            ESP_LOGW(TAG, "touch task allocation failed; video continues");
+        } else {
+            ESP_LOGW(TAG, "unrecognized touch ID at 0x%02x: %02x %02x %02x %02x",
+                     addresses[i], id[0], id[1], id[2], id[3]);
+        }
+        i2c_master_bus_rm_device(s_touch);
+        s_touch = NULL;
+    }
+}
+#endif
+
+static bool submit_preview(void)
+{
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "frame submit failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    /* Same-core completion finishes before task execution resumes. Across
+     * cores allow another completion to cover an ISR already in flight. */
+    s_reuse_after[s_submitted_index] = s_dma_frames + (s_dma_core == xPortGetCoreID() ? 1u : 2u);
+    s_submitted_index = s_draw_index;
+    s_draw_index = (s_draw_index + 1u) % LCD_BUFFERS;
+    s_fb = s_buffers[s_draw_index];
+    return true;
+}
+
+/* Called only by the capture task, even when no frame arrives. Do not use
+ * unchanged-image deduplication as a freshness signal: menus can be static. */
+void capture_dsi_preview_tick(uint32_t completed)
+{
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    if (!s_fb) return;
+    capture_lcd_record_state(&s_record);
+    /* Also reveal controls if recording was started remotely while hidden. */
+    unsigned mode = atomic_load(&s_ui_mode);
+    if ((s_record.recording || s_record.busy) && !lcd_ui_stats(mode)) {
+        mode = lcd_ui_pad(mode) ? LCD_UI_BOTH : LCD_UI_STATS;
+        atomic_store(&s_ui_mode,mode);
+    }
+    if (mode != s_draw_mode) {
+        s_draw_mode = mode;
+        s_show_stats = lcd_ui_stats(mode);
+        /* Erase the previous glyphs in ALL ring buffers, including letterbox. */
+        for (unsigned i = 0; i < LCD_BUFFERS; ++i) s_clear_buffer[i] = true;
+    }
+    const int64_t now = esp_timer_get_time();
+    if (completed != s_seen_completed) {
+        s_seen_completed = completed;
+        s_fresh_us = now;
+    }
+    kvm_video_status_t status;
+    capture_status_get(&status);
+    const char *state = lcd_status_state(status.signal, status.too_fast,
+                                        s_fresh_us ? now - s_fresh_us : -1);
+    const int consumers = video_frame_viewer_count();
+    const int viewers = consumers > (s_record.local_consumer ? 1 : 0)
+        ? consumers - (s_record.local_consumer ? 1 : 0) : 0;
+    static uint32_t last_w, last_h;
+    static uint8_t last_hz;
+    static bool last_interlaced;
+    static int last_viewers = -1;
+    static const char *last_state;
+    const bool changed = !last_state || strcmp(state, last_state) || viewers != last_viewers ||
+        status.hres != last_w || status.vres != last_h || status.input_hz != last_hz ||
+        status.interlaced != last_interlaced;
+    if (!s_strip_us || now - s_strip_us >= 1000000 || changed) {
+        if (s_strip_us && now - s_strip_us >= 1000000) {
+            s_lcd_fps10 = (unsigned)((uint64_t)s_lcd_updates * 10000000 / (now - s_strip_us));
+            s_lcd_updates = 0;
+            s_strip_us = now;
+        } else if (!s_strip_us) s_strip_us = now;
+        snprintf(s_strip, sizeof(s_strip), "%s %lu%c%uHz LCD %u.%u V:%d %s", state,
+                 (unsigned long)status.vres, status.interlaced ? 'i' : 'p', status.input_hz,
+                 s_lcd_fps10 / 10, s_lcd_fps10 % 10, viewers,
+                 viewers ? "REMOTE" : s_record.recording ? "RECORD" : "LOCAL");
+        if (s_record.message[0]) snprintf(s_strip, sizeof(s_strip), "%s", s_record.message);
+        if (changed) {
+            ESP_LOGI(TAG, "LCD status: %s; HDMI %lux%lu", s_strip,
+                     (unsigned long)status.hres, (unsigned long)status.vres);
+            last_state = state; last_viewers = viewers;
+            last_w = status.hres; last_h = status.vres; last_hz = status.input_hz;
+            last_interlaced = status.interlaced;
+        }
+    }
+    if (strcmp(state, "LIVE") && now - s_idle_us >= 1000000 &&
+        (int32_t)(s_dma_frames - s_reuse_after[s_draw_index]) >= 0) {
+        s_idle_us = now;
+        memset(s_fb, 0, LCD_FB_BYTES);
+        if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+        if (s_show_stats && s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
+            s_record.recording, s_record.busy, s_record.seconds);
+#if CONFIG_KVM_USB_XBOX
+        if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
+        if (s_draw_mode==LCD_UI_BT) {
+            draw_bt_overlay();
+        }
+        if (s_draw_mode==LCD_UI_INPUTS) draw_input_strip();
+#endif
+        /* A slate cleared this buffer; reinitialize letterboxing on recovery. */
+        s_clear_buffer[s_draw_index] = true;
+        submit_preview();
+    }
+#else
+    (void)completed;
+#endif
+}
+
+static bool on_dsi_frame_complete(esp_lcd_panel_handle_t panel,
+                                  esp_lcd_dpi_panel_event_data_t *event_data, void *user_ctx)
+{
+    (void)panel;
+    (void)event_data;
+    (void)user_ctx;
+    s_dma_core = xPortGetCoreID();
+    ++s_dma_frames;
+    return false;
+}
+
+static void log_dsi_link(const char *phase)
+{
+    ESP_LOGI(TAG, "DSI %s: phy=0x%08lx mode=0x%08lx cfg=0x%08lx active=0x%08lx err0=0x%08lx err1=0x%08lx",
+             phase,
+             (unsigned long)MIPI_DSI_HOST.phy_status.val,
+             (unsigned long)MIPI_DSI_HOST.mode_cfg.val,
+             (unsigned long)MIPI_DSI_HOST.vid_mode_cfg.val,
+             (unsigned long)MIPI_DSI_HOST.vid_mode_cfg_act.val,
+             (unsigned long)MIPI_DSI_HOST.int_st0.val,
+             (unsigned long)MIPI_DSI_HOST.int_st1.val);
+    ESP_LOGI(TAG, "DSI bridge %s: en=0x%08lx misc=0x%08lx fifo=%lu raw=0x%08lx int=0x%08lx dma_frames=%lu fb=%p",
+             phase,
+             (unsigned long)MIPI_DSI_BRIDGE.en.val,
+             (unsigned long)MIPI_DSI_BRIDGE.dpi_misc_config.val,
+             (unsigned long)MIPI_DSI_BRIDGE.fifo_flow_status.raw_buf_depth,
+             (unsigned long)MIPI_DSI_BRIDGE.int_raw.val,
+             (unsigned long)MIPI_DSI_BRIDGE.int_st.val,
+             (unsigned long)s_dma_frames, s_fb);
+}
+
+static void preview_cleanup(void)
+{
+    if (s_scaler) {
+        ppa_unregister_client(s_scaler);
+        s_scaler = NULL;
+    }
+    if (s_panel) {
+        esp_lcd_panel_del(s_panel);
+        s_panel = NULL;
+    }
+    if (s_dbi_io) {
+        esp_lcd_panel_io_del(s_dbi_io);
+        s_dbi_io = NULL;
+    }
+    if (s_bus) {
+        esp_lcd_del_dsi_bus(s_bus);
+        s_bus = NULL;
+    }
+    if (s_phy_power) {
+        esp_ldo_release_channel(s_phy_power);
+        s_phy_power = NULL;
+    }
+    if (s_ws_control) {
+        i2c_master_bus_rm_device(s_ws_control);
+        s_ws_control = NULL;
+    }
+    s_fb = NULL;
+    memset(s_buffers, 0, sizeof(s_buffers));
+    memset(s_reuse_after, 0, sizeof(s_reuse_after));
+    memset(s_clear_buffer, 0, sizeof(s_clear_buffer));
+    s_draw_index = 0;
+    s_submitted_index = 0;
+    s_dma_frames = 0;
+    s_dma_core = -1;
+}
+
+static void waveshare_control_write(uint8_t reg, uint8_t value)
+{
+    if (!s_ws_control) {
+        return;
+    }
+    const uint8_t command[2] = {reg, value};
+    esp_err_t err = i2c_master_transmit(s_ws_control, command, sizeof(command), 100);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Waveshare control register 0x%02x write failed: %s",
+                 reg, esp_err_to_name(err));
+    }
+}
+
+static void waveshare_control_init(void)
+{
+    i2c_master_bus_handle_t bus = capture_i2c_bus();
+    if (!bus) {
+        ESP_LOGW(TAG, "display control probe skipped: shared I2C bus unavailable");
+        return;
+    }
+    const bool touch14 = i2c_master_probe(bus, 0x14, 100) == ESP_OK;
+    const bool touch5d = i2c_master_probe(bus, 0x5d, 100) == ESP_OK;
+    const bool bridge45 = i2c_master_probe(bus, 0x45, 100) == ESP_OK;
+    /* ICN6211's two selectable 7-bit I2C addresses are 0x2c/0x2d. This is
+     * an ACK-only probe; its onboard MCU may own a separate I2C bus. */
+    const bool icn2c = i2c_master_probe(bus, 0x2c, 100) == ESP_OK;
+    const bool icn2d = i2c_master_probe(bus, 0x2d, 100) == ESP_OK;
+    ESP_LOGI(TAG, "display I2C probe: touch 0x14=%d 0x5d=%d control 0x45=%d ICN6211 0x2c=%d 0x2d=%d",
+             touch14, touch5d, bridge45, icn2c, icn2d);
+    if (!bridge45) {
+        return;
+    }
+    const i2c_device_config_t config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = 0x45,
+        .scl_speed_hz = 100000,
+    };
+    esp_err_t err = i2c_master_bus_add_device(bus, &config, &s_ws_control);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Waveshare display control setup failed: %s", esp_err_to_name(err));
+        return;
+    }
+    /* Mainline Linux's Waveshare DSI2DPI bridge driver initializes the
+     * controller through these three registers before enabling DSI video. */
+    waveshare_control_write(0xc0, 0x01);
+    waveshare_control_write(0xc2, 0x01);
+    waveshare_control_write(0xac, 0x01);
+    waveshare_control_write(0xab, 0x00);
+    waveshare_control_write(0xaa, 0x01);
+    waveshare_control_write(0xad, 0x01);
+}
+
+static void fill_startup_pattern(void)
+{
+    /* A checkerboard is deliberately unlike the ICN6211's internal color-bar
+     * test pattern. It distinguishes a working DSI video link from the panel
+     * merely powering up with no usable signal. */
+    for (uint32_t y = 0; y < LCD_H; ++y) {
+        for (uint32_t x = 0; x < LCD_W; ++x) {
+            uint8_t *p = s_fb + ((size_t)y * LCD_W + x) * 3u;
+            bool yellow = ((x / 80u) + (y / 60u)) & 1u;
+            p[0] = yellow ? 255 : 0;
+            p[1] = yellow ? 255 : 0;
+            p[2] = 0;
+        }
+    }
+    (void)esp_cache_msync(s_fb, LCD_FB_BYTES,
+                          ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE || CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+static esp_err_t icn6211_read_register(uint8_t reg, uint8_t *value)
+{
+    dsi_host_dev_t *host = &MIPI_DSI_HOST;
+    const int64_t deadline = esp_timer_get_time() + ICN_READ_TIMEOUT_US;
+
+    /* Linux's ICN6211 driver issues a two-byte generic read request:
+     * register address followed by requested response length. Do not use
+     * IDF's read helper here: it waits forever for an absent reply. */
+    while (mipi_dsi_host_ll_gen_is_cmd_fifo_full(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    mipi_dsi_host_ll_gen_set_packet_header(host, 0, MIPI_DSI_DT_SET_MAXIMUM_RETURN_PKT, 0, 1);
+    while (!mipi_dsi_host_ll_gen_is_cmd_fifo_empty(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+
+    mipi_dsi_host_ll_enable_bta(host, true);
+    mipi_dsi_host_ll_gen_set_rx_vcid(host, 0);
+    mipi_dsi_host_ll_gen_set_packet_header(host, 0, MIPI_DSI_DT_GENERIC_READ_REQUEST_2, 1, reg);
+    while (mipi_dsi_host_ll_gen_is_read_cmd_busy(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            mipi_dsi_host_ll_enable_bta(host, false);
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    while (mipi_dsi_host_ll_gen_is_read_fifo_empty(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            mipi_dsi_host_ll_enable_bta(host, false);
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    *value = (uint8_t)mipi_dsi_host_ll_gen_read_payload_fifo(host);
+    mipi_dsi_host_ll_enable_bta(host, false);
+    return ESP_OK;
+}
+#endif
+
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE
+static void icn6211_probe(void)
+{
+    /* IDs first; then inspect the bridge's current BIST, geometry, clock,
+     * lane, and configuration state without overriding its Nuvoton MCU. */
+    static const uint8_t regs[] = {
+        0x00, 0x01, 0x02, 0x03, 0x09, 0x10, 0x11, 0x1e,
+        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x27, 0x28,
+        0x29, 0x2a, 0x56, 0x69, 0x6b, 0x7a, 0x86, 0xb5, 0xb6,
+    };
+    for (size_t i = 0; i < sizeof(regs); ++i) {
+        const uint8_t reg = regs[i];
+        uint8_t value = 0;
+        esp_err_t err = icn6211_read_register(reg, &value);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "ICN6211 register 0x%02x: %s; stopping probe",
+                     reg, esp_err_to_name(err));
+            break;
+        }
+        ESP_LOGI(TAG, "ICN6211 register 0x%02x = 0x%02x", reg, value);
+    }
+    log_dsi_link("after ICN6211 read-only probe");
+}
+#endif
+
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+static esp_err_t icn6211_write_register(uint8_t reg, uint8_t value)
+{
+    dsi_host_dev_t *host = &MIPI_DSI_HOST;
+    const int64_t deadline = esp_timer_get_time() + ICN_READ_TIMEOUT_US;
+    while (mipi_dsi_host_ll_gen_is_cmd_fifo_full(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    /* Linux's ICN6211 DSI regmap sends {register, value} as a two-byte
+     * generic short write; this is not a DCS display command. */
+    mipi_dsi_host_ll_gen_set_packet_header(host, 0, MIPI_DSI_DT_GENERIC_SHORT_WRITE_2,
+                                           value, reg);
+    while (!mipi_dsi_host_ll_gen_is_cmd_fifo_empty(host)) {
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t icn6211_disable_bist(void)
+{
+    const uint8_t expected_id[] = {0xc1, 0x62, 0x11};
+    for (uint8_t reg = 0; reg < sizeof(expected_id); ++reg) {
+        uint8_t value;
+        ESP_RETURN_ON_ERROR(icn6211_read_register(reg, &value), TAG, "read ICN6211 ID failed");
+        if (value != expected_id[reg]) {
+            ESP_LOGE(TAG, "unexpected ICN6211 ID byte %u: 0x%02x", reg, value);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+    uint8_t before;
+    ESP_RETURN_ON_ERROR(icn6211_read_register(0x2a, &before), TAG, "read BIST failed");
+    const uint8_t after = before & ~0x08u; /* BIST_POL_BIST_GEN */
+    ESP_LOGI(TAG, "ICN6211 BIST 0x2a: 0x%02x -> 0x%02x", before, after);
+    if (before == after) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(icn6211_write_register(0x2a, after), TAG, "write BIST failed");
+    uint8_t verify;
+    ESP_RETURN_ON_ERROR(icn6211_read_register(0x2a, &verify), TAG, "verify BIST failed");
+    if (verify != after) {
+        ESP_LOGE(TAG, "ICN6211 BIST write did not stick: 0x%02x", verify);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    ESP_LOGI(TAG, "ICN6211 BIST enable bit confirmed clear; starting checkerboard");
+    return ESP_OK;
+}
+
+static void icn6211_inspect_video(void)
+{
+    /* Generic read responses require command mode on this host. Stop DPI
+     * first so its DMA source does not continue feeding a stopped video sink. */
+    /* In a live build this runs on the watched camera task. Keep the same
+     * settling interval without mistaking the intentional sleep for a hang.
+     * Standalone startup runs on a task that may not be subscribed. */
+    for (unsigned i = 0; i < 10; ++i) {
+        if (esp_task_wdt_status(NULL) == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    if (esp_task_wdt_status(NULL) == ESP_OK) {
+        esp_task_wdt_reset();
+    }
+    log_dsi_link("before paused bridge read");
+    mipi_dsi_brg_ll_enable_dpi_output(&MIPI_DSI_BRIDGE, false);
+    mipi_dsi_brg_ll_update_dpi_config(&MIPI_DSI_BRIDGE);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    mipi_dsi_host_ll_enable_video_mode(&MIPI_DSI_HOST, false);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    static const uint8_t regs[] = {0x00, 0x01, 0x02, 0x2a, 0x80, 0x81,
+                                   0x84, 0x85, 0x86, 0x87, 0x56, 0x69, 0x6b, 0x7a};
+    uint8_t bist = 0;
+    for (size_t i = 0; i < sizeof(regs); ++i) {
+        uint8_t value;
+        esp_err_t err = icn6211_read_register(regs[i], &value);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "paused ICN6211 0x%02x: %s", regs[i], esp_err_to_name(err));
+            break;
+        }
+        ESP_LOGI(TAG, "paused ICN6211 0x%02x = 0x%02x", regs[i], value);
+        if (regs[i] == 0x2a) {
+            bist = value;
+        }
+    }
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+    if (bist & 0x08) {
+        esp_err_t err = icn6211_write_register(0x7a, 0xc1);
+        if (err == ESP_OK) {
+            err = icn6211_write_register(0x2a, bist & ~0x08u);
+        }
+        ESP_LOGI(TAG, "post-video BIST clear: %s", esp_err_to_name(err));
+    }
+#else
+    (void)bist;
+#endif
+    mipi_dsi_host_ll_enable_video_mode(&MIPI_DSI_HOST, true);
+    mipi_dsi_brg_ll_enable_dpi_output(&MIPI_DSI_BRIDGE, true);
+    mipi_dsi_brg_ll_update_dpi_config(&MIPI_DSI_BRIDGE);
+}
+
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+static esp_err_t icn6211_configure_mipi_pll(bool verify)
+{
+    /* ICN6211's configuration tool and Linux driver use 0xc1 to permit DSI
+     * writes. At 576 Mb/s the PLL reference is 144 MHz. P=6, M=16, S=16
+     * gives the panel's existing 24 MHz pixel clock. Geometry stays intact. */
+    static const uint8_t setup[][2] = {
+        {0x7a, 0xc1}, {0x6b, 0x73}, {0x69, 0x10},
+        {0x56, 0x92}, {0x09, 0x10},
+    };
+    for (size_t i = 0; i < sizeof(setup) / sizeof(setup[0]); ++i) {
+        ESP_RETURN_ON_ERROR(icn6211_write_register(setup[i][0], setup[i][1]),
+                            TAG, "MIPI PLL setup write failed");
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if (!verify) continue;
+        uint8_t actual;
+        ESP_RETURN_ON_ERROR(icn6211_read_register(setup[i][0], &actual),
+                            TAG, "MIPI PLL setup readback failed");
+        ESP_LOGI(TAG, "ICN6211 PLL register 0x%02x expected=0x%02x actual=0x%02x",
+                 setup[i][0], setup[i][1], actual);
+        ESP_RETURN_ON_FALSE(actual == setup[i][1], ESP_ERR_INVALID_RESPONSE,
+                            TAG, "MIPI PLL setup rejected");
+    }
+    return ESP_OK;
+}
+#endif
+
+#endif
+
+static esp_err_t preview_start_once(unsigned attempt)
+{
+    (void)attempt;
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+    bool bridge_readable = false;
+#endif
+    waveshare_control_init();
+    const esp_ldo_channel_config_t ldo_cfg = {
+        .chan_id = 3, /* Function EV: LDO_VO3 -> VDD_MIPI_DPHY */
+        .voltage_mv = 2500,
+    };
+    esp_err_t err = esp_ldo_acquire_channel(&ldo_cfg, &s_phy_power);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    const esp_lcd_dsi_bus_config_t bus_cfg = {
+        .bus_id = 0,
+        .num_data_lanes = 1,
+        .lane_bit_rate_mbps = 576, /* non-burst RGB888: 24 MHz * 24 bits */
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+        .flags.clock_lane_force_hs = attempt == 1,
+#endif
+    };
+    err = esp_lcd_new_dsi_bus(&bus_cfg, &s_bus);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    /* Raspberry Pi's VC4 DSI host disables HS end-of-transmission packets for
+     * this generic panel; IDF enables them by default. */
+    MIPI_DSI_HOST.pckhdl_cfg.eotp_tx_en = 0;
+
+    /* Waveshare's ESP DSI component performs bridge control, waits one second,
+     * then sends MADCTL, sleep-out and display-on DCS commands before starting
+     * DPI video. The Pi overlay does not describe these commands, so keep this
+     * sequence confined to the opt-in experimental preview. */
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    const esp_lcd_dbi_io_config_t dbi_cfg = {
+        .virtual_channel = 0,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
+    err = esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_dbi_io);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    /* IDF's DBI constructor requests an ACK for every write. This generic
+     * video bridge must not be left awaiting an unsolicited write reply.
+     * Explicit register reads below manage BTA themselves. */
+    mipi_dsi_host_ll_enable_cmd_ack(&MIPI_DSI_HOST, false);
+    mipi_dsi_host_ll_enable_bta(&MIPI_DSI_HOST, false);
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_PROBE
+    ESP_LOGW(TAG, "read-only ICN6211 DSI probe; no framebuffer video will start");
+    icn6211_probe();
+    return ESP_OK;
+#endif
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+    if (attempt == 2) {
+        /* A warm panel can retain its command-interface selection. Restore
+         * DSI access before demanding an ID reply, using the ICN6211's
+         * documented configuration password (Linux chipone-icn6211). */
+        err = icn6211_write_register(0x7a, 0xc1);
+        if (err != ESP_OK) goto fail;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (attempt < 3) {
+        err = icn6211_disable_bist();
+        if (err != ESP_OK) goto fail;
+        bridge_readable = true;
+    } else {
+        /* A failed BTA leaves PHY direction in receive even after a host
+         * soft reset. This fresh host must not request a reply at all. */
+        ESP_LOGW(TAG, "LCD final attempt: write-only bridge setup, no readback");
+    }
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+    mipi_dsi_host_ll_set_clock_lane_state(&MIPI_DSI_HOST, MIPI_DSI_LL_CLOCK_LANE_STATE_HS);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    err = icn6211_configure_mipi_pll(bridge_readable);
+    if (err != ESP_OK) goto fail;
+#endif
+#endif
+    const uint8_t dcs_zero = 0;
+    err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_MADCTL, &dcs_zero, 1);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_SLPOUT, &dcs_zero, 1);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    vTaskDelay(pdMS_TO_TICKS(120));
+    err = esp_lcd_panel_io_tx_param(s_dbi_io, LCD_CMD_DISPON, &dcs_zero, 1);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    const esp_lcd_dpi_panel_config_t dpi_cfg = {
+        .virtual_channel = 0,
+        .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
+        .dpi_clock_freq_mhz = 24,
+        .in_color_format = LCD_COLOR_FMT_RGB888,
+        .out_color_format = LCD_COLOR_FMT_RGB888,
+        .num_fbs = LCD_BUFFERS,
+        .video_timing = {
+            .h_size = LCD_W,
+            .v_size = LCD_H,
+            .hsync_front_porch = 48,
+            .hsync_pulse_width = 32,
+            .hsync_back_porch = 80,
+            .vsync_front_porch = 3,
+            .vsync_pulse_width = 4,
+            .vsync_back_porch = 13,
+        },
+    };
+    err = esp_lcd_new_panel_dpi(s_bus, &dpi_cfg, &s_panel);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    err = esp_lcd_dpi_panel_get_frame_buffer(s_panel, LCD_BUFFERS,
+#if LCD_BUFFERS == 3
+                                            (void **)&s_buffers[0], (void **)&s_buffers[1],
+                                            (void **)&s_buffers[2]);
+#else
+                                            (void **)&s_buffers[0], (void **)&s_buffers[1]);
+#endif
+    s_fb = s_buffers[0];
+    if (err != ESP_OK || !s_fb) {
+        if (err == ESP_OK) {
+            err = ESP_ERR_NO_MEM;
+        }
+        goto fail;
+    }
+    fill_startup_pattern();
+    const esp_lcd_dpi_panel_event_callbacks_t callbacks = {
+        .on_frame_buf_complete = on_dsi_frame_complete,
+    };
+    err = esp_lcd_dpi_panel_register_event_callbacks(s_panel, &callbacks, NULL);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    /* The Waveshare DT overlay requests plain MIPI_DSI_MODE_VIDEO (non-burst).
+     * IDF currently hardcodes burst video and per-frame BTA acknowledgements
+     * for all DPI panels; this generic bridge has no DSI command response.
+     * Set these before panel_init starts video output. */
+    MIPI_DSI_HOST.vid_mode_cfg.vid_mode_type = 1; /* non-burst, sync events */
+    MIPI_DSI_HOST.vid_mode_cfg.frame_bta_ack_en = 0;
+    err = esp_lcd_panel_init(s_panel);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+#if CONFIG_KVM_DSI_PREVIEW_HOST_PATTERN
+    err = esp_lcd_dpi_panel_set_pattern(s_panel, MIPI_DSI_PATTERN_BAR_VERTICAL);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    ESP_LOGW(TAG, "DSI host vertical-bar diagnostic active; Xbox preview hidden");
+#endif
+    vTaskDelay(pdMS_TO_TICKS(100));
+    log_dsi_link("startup");
+    ESP_LOGI(TAG, "Waveshare 3.5 DSI preview started: 640x480 RGB888, viewer-aware budget");
+#if CONFIG_KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+    if (bridge_readable) icn6211_inspect_video();
+#endif
+    /* Framebuffer zero is on screen; prepare the first live frame in one. */
+    s_draw_index = 1;
+    s_fb = s_buffers[s_draw_index];
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    touch_init();
+#endif
+    return ESP_OK;
+
+fail:
+    if (s_bus) log_dsi_link("startup failure");
+    preview_cleanup();
+    return err;
+}
+
+void capture_dsi_preview_init(void)
+{
+    /* Startup only: never tear down a live panel underneath the touch task.
+     * Recreate the host after a timed-out BTA rather than reuse its FIFOs.
+     * Bound retries so an absent LCD cannot prevent browser capture starting. */
+    if (s_bus) {
+        return;
+    }
+    for (unsigned attempt = 1; attempt <= 3; ++attempt) {
+        if (esp_task_wdt_status(NULL) == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+        ESP_LOGI(TAG, "LCD startup attempt %u/3", attempt);
+        esp_err_t err = preview_start_once(attempt);
+        if (err == ESP_OK) {
+            return;
+        }
+        ESP_LOGW(TAG, "LCD startup attempt %u/3 failed: %s", attempt,
+                 esp_err_to_name(err));
+        if (err == ESP_ERR_INVALID_RESPONSE) break;
+        if (attempt < 3) {
+            /* Give the panel MCU time to settle without starving the watched
+             * capture task. No power cycling of the shared CSI/DSI PHY LDO. */
+            for (unsigned i = 0; i < attempt * 10; ++i) {
+                if (esp_task_wdt_status(NULL) == ESP_OK) {
+                    esp_task_wdt_reset();
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        }
+    }
+    ESP_LOGE(TAG, "LCD startup exhausted; capture and browser continue without preview");
+}
+
+bool capture_dsi_preview_due(void)
+{
+    capture_lcd_record_state_t record;
+    capture_lcd_record_state(&record);
+    /* The recorder is one encoded-frame consumer, not a remote spectator. */
+    const bool remote = video_frame_viewer_count() > (record.local_consumer ? 1 : 0);
+    const int fps = kvm_thermal_fps_limit(remote ? PREVIEW_REMOTE_FPS : PREVIEW_LOCAL_FPS);
+    if (!s_fb || fps <= 0 || (int32_t)(s_dma_frames - s_reuse_after[s_draw_index]) < 0) {
+        return false;
+    }
+    if (s_last_priority != (int)remote) {
+        s_last_priority = remote;
+        ESP_LOGI(TAG, "priority: %s", remote ? "remote (LCD <=1 fps, <=5% copy duty)"
+                                            : "LCD (<=60 fps, general<=80% / fast<=90% duty)");
+    }
+    /* Bound CPU work as well as FPS. Always leave time for network/control
+     * tasks, and back off automatically when the scaler takes longer. */
+    int64_t interval = 1000000 / fps;
+    const int64_t budget = remote ? s_last_cost_us * 20 :
+        (s_last_fast_path ? s_last_cost_us * 10 / 9 : s_last_cost_us * 5 / 4);
+    if (budget > interval) {
+        interval = budget;
+    }
+    return esp_timer_get_time() - s_last_frame_us >= interval;
+}
+
+static uint8_t clamp8(int v)
+{
+    return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+}
+
+static void source_pixel(const uint8_t *src, uint32_t src_w, uint32_t x, uint32_t y,
+                         const capture_pixfmt_t *fmt, bool bgr, uint8_t *dst)
+{
+    const size_t pos = (size_t)y * src_w + x;
+    if (fmt->bpp == 24) {
+        const uint8_t *p = src + pos * 3u;
+        if (bgr) {
+            dst[0] = p[2]; dst[1] = p[1]; dst[2] = p[0];
+        } else {
+            dst[0] = p[0]; dst[1] = p[1]; dst[2] = p[2];
+        }
+        return;
+    }
+
+    /* Packed 4:2:2: the TC358743 uses UYVY; the LT6911D uses YUYV. */
+    const uint8_t *p = src + (pos & ~(size_t)1u) * 2u;
+    const int luma = fmt->luma_first ? p[(x & 1u) ? 2 : 0]
+                                       : p[(x & 1u) ? 3 : 1];
+    const int u = (fmt->luma_first ? p[1] : p[0]) - 128;
+    const int v = (fmt->luma_first ? p[3] : p[2]) - 128;
+    const int yy = 298 * (luma - 16);
+    dst[0] = clamp8((yy + 409 * v + 128) >> 8);
+    dst[1] = clamp8((yy - 100 * u - 208 * v + 128) >> 8);
+    dst[2] = clamp8((yy + 516 * u + 128) >> 8);
+}
+
+static bool scale_hardware(const void *src, uint32_t width, uint32_t height,
+                           uint32_t out_w, uint32_t out_h, uint32_t x0, uint32_t y0,
+                           const capture_pixfmt_t *fmt)
+{
+#if !CONFIG_KVM_DSI_PREVIEW_PPA
+    return false;
+#endif
+    /* Use only exact sixteenth-step RGB scales. Other modes retain the known
+     * CPU fit rather than silently cropping or stretching to PPA granularity. */
+    if (s_scaler_failed || fmt->bpp != 24 || (out_w * 16u) % width ||
+        (out_h * 16u) % height || out_w * 16u < width || out_h * 16u < height) {
+        return false;
+    }
+    if (!s_scaler) {
+        const ppa_client_config_t cfg = {.oper_type = PPA_OPERATION_SRM};
+        esp_err_t err = ppa_register_client(&cfg, &s_scaler);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "PPA unavailable (%s); using CPU scaler", esp_err_to_name(err));
+            s_scaler_failed = true;
+            return false;
+        }
+    }
+    const ppa_srm_oper_config_t cfg = {
+        .in = {.buffer = src, .pic_w = width, .pic_h = height,
+               .block_w = width, .block_h = height, .srm_cm = PPA_SRM_COLOR_MODE_RGB888},
+        .out = {.buffer = s_fb, .buffer_size = LCD_FB_BYTES,
+                .pic_w = LCD_W, .pic_h = LCD_H, .block_offset_x = x0,
+                .block_offset_y = y0, .srm_cm = PPA_SRM_COLOR_MODE_RGB888},
+        .scale_x = (float)out_w / width, .scale_y = (float)out_h / height,
+        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+        .rgb_swap = strcmp(fmt->name, "bgr888") == 0,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    /* The PPA driver invalidates its destination before DMA. The status strip
+     * writes only after completion; other destination cache lines stay clean. */
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_scaler, &cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "PPA failed (%s); using CPU scaler", esp_err_to_name(err));
+        s_scaler_failed = true;
+        return false;
+    }
+    return true;
+}
+
+void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
+                               const capture_pixfmt_t *fmt)
+{
+    if (!capture_dsi_preview_due() || !src || !width || !height || !fmt ||
+        (fmt->bpp != 16 && fmt->bpp != 24)) {
+        return;
+    }
+    s_last_frame_us = esp_timer_get_time();
+
+    /* Preserve the source aspect ratio, with black bars rather than stretching
+     * the Xbox's 16:9 modes into the panel's 4:3 glass. */
+    uint32_t out_w = LCD_W;
+    uint32_t out_h = (uint32_t)((uint64_t)height * LCD_W / width);
+    if (out_h > LCD_H) {
+        out_h = LCD_H;
+        out_w = (uint32_t)((uint64_t)width * LCD_H / height);
+    }
+    if (!out_w || !out_h) {
+        return;
+    }
+    const uint32_t x0 = (LCD_W - out_w) / 2u;
+    const uint32_t y0 = (LCD_H - out_h) / 2u;
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    atomic_store(&s_bar_margin,y0);
+#endif
+    if (width != s_last_w || height != s_last_h) {
+        for (unsigned i = 0; i < LCD_BUFFERS; ++i) {
+            s_clear_buffer[i] = true;
+        }
+        s_last_w = width;
+        s_last_h = height;
+        for (uint32_t dx = 0; dx < out_w; ++dx) {
+            s_source_x[dx] = (uint32_t)((uint64_t)dx * width / out_w);
+        }
+        ESP_LOGI(TAG, "preview input %lux%lu -> %lux%lu", (unsigned long)width,
+                 (unsigned long)height, (unsigned long)out_w, (unsigned long)out_h);
+    }
+    if (s_clear_buffer[s_draw_index]) {
+        memset(s_fb, 0, LCD_FB_BYTES);
+        if (esp_cache_msync(s_fb, LCD_FB_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M) != ESP_OK) {
+            return;
+        }
+        s_clear_buffer[s_draw_index] = false;
+    }
+    const bool accelerated = scale_hardware(src, width, height, out_w, out_h, x0, y0, fmt);
+    const bool bgr = strcmp(fmt->name, "bgr888") == 0;
+    const bool packed_half = fmt->bpp == 24 && !bgr && width == out_w * 2u;
+    const bool packed_9to8 = fmt->bpp == 24 && !bgr && width * 8u == out_w * 9u;
+    for (uint32_t dy = 0; !accelerated && dy < out_h; ++dy) {
+        const uint32_t sy = (uint32_t)((uint64_t)dy * height / out_h);
+        uint8_t *line = s_fb + ((size_t)(dy + y0) * LCD_W + x0) * 3u;
+        if (packed_half) {
+            lcd_rgb_half_line((const uint8_t *)src + (size_t)sy * width * 3u, line, out_w);
+            continue;
+        }
+        if (packed_9to8) {
+            lcd_rgb_9to8_line((const uint8_t *)src + (size_t)sy * width * 3u, line, out_w);
+            continue;
+        }
+        for (uint32_t dx = 0; dx < out_w; ++dx) {
+            source_pixel(src, width, s_source_x[dx], sy, fmt, bgr, line + dx * 3u);
+        }
+    }
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    if (s_show_stats) lcd_status_strip(s_fb, LCD_W, LCD_H, s_strip);
+    if (s_show_stats && s_record.available) lcd_record_button(s_fb, LCD_W, LCD_H,
+        s_record.recording, s_record.busy, s_record.seconds);
+#if CONFIG_KVM_USB_XBOX
+    if (lcd_ui_pad(s_draw_mode)) lcd_pad_draw(s_fb);
+    if (s_draw_mode==LCD_UI_BT) {
+        draw_bt_overlay();
+    }
+    if (s_draw_mode==LCD_UI_INPUTS) draw_input_strip();
+#endif
+#endif
+    if (!submit_preview()) return;
+#if CONFIG_KVM_DSI_STATUS_STRIP
+    ++s_lcd_updates;
+#endif
+    s_frames++;
+    if (!s_link_logged && s_frames >= 5) {
+        s_link_logged = true;
+        log_dsi_link("stream");
+    }
+    const int64_t now = esp_timer_get_time();
+    s_last_cost_us = now - s_last_frame_us;
+    s_last_fast_path = accelerated || packed_half || packed_9to8;
+    if (now - s_report_us >= 10000000) {
+        ESP_LOGI(TAG, "preview: %lu updates in %lu ms, copy %lu us (%s, %u buffers)", (unsigned long)s_frames,
+                 (unsigned long)((now - s_report_us) / 1000), (unsigned long)s_last_cost_us,
+                 accelerated ? "PPA" : (packed_half ? "CPU 2:1" :
+                    (packed_9to8 ? "CPU 9:8" : "CPU")), LCD_BUFFERS);
+        s_frames = 0;
+        s_report_us = now;
+    }
+}
+
+#else
+
+void capture_dsi_preview_init(void) {}
+void capture_dsi_preview_tick(uint32_t completed) { (void)completed; }
+bool capture_dsi_preview_due(void) { return false; }
+void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
+                               const capture_pixfmt_t *fmt)
+{
+    (void)src; (void)width; (void)height; (void)fmt;
+}
+
+#endif

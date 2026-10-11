@@ -71,6 +71,12 @@ docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
 
 ## Conventions
 
+- For this Xbox fork, track upstream consideration in `docs/UPSTREAM-REVIEW.md`.
+  Record source commit URLs, explicit decisions, adaptation scope, and tests.
+  Adapted commits carry an `Adapted-from:` source URL; add our implementation
+  commit link to the ledger in a follow-up commit. Do not treat pending triage
+  as approval to integrate, flash, or push. A behind count is not an update goal.
+
 - **Comments say why, not what**, and match the density of the code around them.
   This codebase leans on prose to record hard-won reasoning; keep that.
 - **No hard-to-type Unicode in source** (no em dashes, smart quotes, etc.). In

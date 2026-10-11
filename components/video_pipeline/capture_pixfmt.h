@@ -44,7 +44,7 @@ typedef struct {
  * the encoder straight from the capture buffer and skips the PPA colour convert;
  * rev < 3.0 keeps the PPA path. Every board difference keys off this one macro.
  */
-#if defined(CONFIG_ESP_REV_MIN_FULL) && CONFIG_ESP_REV_MIN_FULL >= 300
+#if defined(CONFIG_ESP_REV_MIN_FULL) && CONFIG_ESP_REV_MIN_FULL >= 300 && !CONFIG_KVM_CAPTURE_DEBUG_RGB
 #define CAPTURE_DIRECT_ENCODE 1
 #else
 #define CAPTURE_DIRECT_ENCODE 0

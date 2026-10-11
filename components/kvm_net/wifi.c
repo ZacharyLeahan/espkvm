@@ -375,6 +375,11 @@ static esp_err_t wifi_start_sta(void)
         kvm_cap_report(KVM_CAP_WIFI, false, "WiFi station netif creation failed");
         return ESP_FAIL;
     }
+#if CONFIG_KVM_ETH_WIFI_FAILOVER
+    /* Ethernet is 100 in dual-link mode; this stays usable when the cable is
+     * down but cannot steal the default route while the cable is healthy. */
+    (void)esp_netif_set_route_prio(s_netif, 50);
+#endif
     /* Sent as the DHCP client hostname (option 12) so the router lists the device
      * by name, matching Ethernet. */
     (void)esp_netif_set_hostname(s_netif, wifi_hostname());
@@ -418,6 +423,10 @@ static esp_err_t wifi_start_sta(void)
      * reachable. The station associates from the STA_START event, only if an SSID
      * is set. */
     ESP_RETURN_ON_FALSE(esp_wifi_start() == ESP_OK, ESP_FAIL, TAG, "wifi start");
+    /* This mains-powered video device favors latency over modem sleep. */
+    if (esp_wifi_set_ps(WIFI_PS_NONE) != ESP_OK) {
+        ESP_LOGW(TAG, "could not disable Wi-Fi power saving");
+    }
     if (hotspot) {
         char apssid[33];
         derive_ap_ssid(apssid, sizeof(apssid));
@@ -540,6 +549,10 @@ esp_err_t kvm_wifi_init(void)
 {
     const int32_t m = kvm_setting_int("net_mode");
     s_mode = (m == KVM_NET_WIFI_AP) ? KVM_NET_WIFI_AP : KVM_NET_WIFI_STA;
+
+    /* HTTP startup still needs lwIP if the optional C6 fails to answer. */
+    (void)esp_netif_init();
+    (void)esp_event_loop_create_default();
 
     if (coproc_wifi_up() != ESP_OK) {
         return ESP_OK; /* WiFi is optional; the warning is already logged */

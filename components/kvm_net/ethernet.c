@@ -314,6 +314,12 @@ esp_err_t ethernet_init(void)
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     s_eth_netif = esp_netif_new(&netif_cfg);
     ESP_RETURN_ON_FALSE(s_eth_netif, ESP_FAIL, TAG, "netif");
+#if CONFIG_KVM_ETH_WIFI_FAILOVER
+    /* ESP-IDF normally prefers its WiFi STA (100) over Ethernet (50). This
+     * private dual-link mode deliberately inverts that: the cable is steadier
+     * for a KVM, and WiFi remains up only as the automatic fallback. */
+    (void)esp_netif_set_route_prio(s_eth_netif, 100);
+#endif
     /* The name is a setting, not a build-time constant: two of these on one
      * network otherwise answer to the same mDNS address. */
     const char *hostname = kvm_setting_str("net_hostname");

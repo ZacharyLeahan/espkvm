@@ -7,6 +7,176 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Changed
+- Add an inputs-only LCD mode immediately after Bluetooth setup in the tap
+  cycle, followed by fully hidden. A 32-pixel bottom strip shows recent complete
+  input events without stats or pairing controls; Bluetooth stays connected.
+  The strip overlays the bottom edge and does not resize the game image.
+- Replace the single recent-button label with highlighted held controls and
+  eight press events observed at USB submission, including remote macros.
+  Group quick chords, clear history after three seconds neutral, filter stick
+  jitter with hysteresis, and provide optional latest-event hold/gap timings.
+  Host regression tests pass; physical UI verification remains pending.
+- Keep Bluetooth input connected when hiding or cycling the LCD overlay.
+  Add explicit Connect/Disconnect controls and translated button-combination
+  feedback, with an 800 ms display linger. Physical UI verification pending.
+- Reconnect directly to the encrypted, bonded controller on Bluetooth-mode
+  reentry, rather than requiring a full-name pairing advertisement. Fall back
+  to discovery after a failed direct attempt; recognize the remembered peer
+  without its name. Preserve a reentry request during disconnect completion.
+  Same-boot reconnect testing is pending; reboot persistence is not added.
+- Add bounded Bluetooth link recovery (up to three rescans per local Bluetooth
+  session), peer-scoped repeat-pairing repair without a security downgrade, and
+  clearer connection/security diagnostics. Trial a six-second supervision
+  timeout after observed `0x208` link timeouts. Operator confirmed successful
+  pairing/input with `371e4b8`; logs show encrypted bonding and 58 forwarded
+  reports. Automatic retry and bond replacement were not exercised in that
+  successful attempt; bonds and identity remain volatile across reboots.
+- Record operator-confirmed Series Bluetooth button operation on the original
+  Xbox (2026-10-11, `f8aec1c`). Update the README for touchscreen/BLE controls
+  and the separate unresolved rolling-LCD issue. Analog precision, reconnect,
+  long holds, latency, and soak testing remain pending.
+- Read the HID report map and enable every input-report subscription, not only
+  report 1. Distinguish connection setup from actual input activity on the LCD
+  and log bounded notification diagnostics for the Series controller test.
+- Select NimBLE's mbedTLS backend for Xbox BLE to avoid the ESP-IDF 6.1 P4
+  TinyCrypt DHKey regression (esp-hosted-mcu#241). Add a published P-256
+  known-answer test before pairing; it passed on the physical device.
+- Test a random-static BLE identity after public-address pairing still failed
+  with peer DHKey-check error `0x50B`; identity persistence remains pending.
+- Match the Series BLE reference's pairing auth-request flags after the first
+  controller rejected the DHKey check; show a specific pairing-rejected status.
+  That isolated retry failed; encrypted Just Works pairing was retained.
+- Extend the experimental Bluetooth mode with encrypted Series-controller
+  pairing, HID report subscription, and analog XID translation. Host parser
+  tests pass; physical button operation subsequently confirmed. Disconnect and
+  stale-input safety release controls. Rumble is not implemented.
+- Add opt-in fifth LCD mode for Xbox BLE discovery through the onboard C6.
+  Initially a radio diagnostic, subsequently extended to pairing/input forwarding.
+  Keep it disabled by default while validating Wi-Fi/LCD coexistence.
+- Make local touchscreen sticks proportional, with a radial dead zone and
+  independent signed XID axes. Preserve button combinations and release safety;
+  network keyboard stick mappings remain full-deflection.
+- Add experimental local Xbox touchscreen controls and a four-mode cycle on
+  unused letterbox space: hidden, stats, stats + controller, controller.
+  Preserve Stop visibility while recording, release stale touch inputs, and
+  give fresh physical touches priority over remote keyboard input.
+- Add opt-in original-Xbox XID USB controller bring-up with keyboard-to-button
+  mapping, neutral-input timeout, and host report-encoding tests. Replaces
+  PC USB interfaces only when enabled. Real Xbox enumeration and a 200 ms
+  dashboard D-pad press verified. Xbox Controller Tool subsequently verified
+  all individual buttons, triggers and stick-axis directions on physical port
+  1, plus neutral release. Gameplay and proportional analog input remain pending.
+- Add an experimental final LCD startup fallback when bridge readback times
+  out, preserving the verified path first and logging DSI failure registers.
+  Physical output and HDMI hot-plug recovery still require validation.
+- Disable implicit DBI command acknowledgements for the generic LCD bridge.
+  With the no-read fallback, this cleared the measured receive-direction stall
+  and restored sustained LCD DMA/render updates on the affected device.
+- Retry failed LCD startup up to three times with DSI teardown and bounded
+  settling delays. An unavailable display still allows browser capture;
+  this does not yet provide runtime recovery for a stalled LCD.
+- Keep the LCD overlay visible during recording and start/stop transitions.
+  Near-misses no longer hide Stop; idle tap-to-hide behavior is unchanged.
+- Make the LCD tap-to-hide toggle global: hide stats, recording controls and
+  timer together without stopping recording. Hidden controls cannot trigger;
+  the next tap reveals the overlay first.
+- Replace LCD recording text labels with a bordered record-circle/stop-square
+  button, a separate red recording indicator and timer, and amber busy dots.
+  Preserve the existing hit area and cached drawing to avoid per-frame work.
+- Initialize networking before optional C6 startup, reserve Function EV GPIO 6,
+  and disable station modem sleep for interactive video. Adapt upstream fixes
+  separately; Wi-Fi PSRAM allocation and Microlink changes remain pending.
+- Select an exact RGB888 9:8 run-copy scaler automatically for 720-pixel-wide
+  input fitted to 640 pixels (480p), alongside the existing 720p 2:1 path.
+  Both use the bounded fast CPU budget; other formats retain general scaling.
+- Promote three-buffer CPU rendering to the recommended Function EV LCD
+  profile: about 28-29 updates/s at 720p, visually confirmed smooth during
+  gameplay. Add per-buffer safe-reuse tracking. PPA stays off; generic builds
+  retain two buffers because the third consumes another 900 KiB of PSRAM.
+- Identify packed CPU scaling in LCD diagnostics and test a 90% local budget
+  for that path. The measured 720p output remains about 20 fps; preserve the
+  separate low-rate remote-viewer policy.
+- Shorten LCD buffer handoff only for same-core DMA callbacks and add an
+  alias-safe packed RGB half-scaler, with randomized reference tests. Keep
+  PPA off: the CPU double-buffer control was visually confirmed smooth.
+- Add opt-in PPA scaling for exact RGB LCD ratios and double-buffered display
+  handoff. A single-buffer 720p trial reached 29.4 updates/s but showed tearing;
+  PPA remains disabled pending visual validation. Remote priority is unchanged.
+- Give the LCD a larger adaptive copy budget without remote viewers; prioritize
+  encoding and limit LCD updates to at most 1 fps when viewers connect. Cache
+  scaler coordinates and respect thermal throttling in both modes.
+- Bound Xbox-profile TCP receive/send buffers to 8 KiB and receive mailboxes
+  to eight entries. A ten-minute local test completed with zero reconnects;
+  document exact settings, frame gaps, reboot recovery, and the 720p game check.
+- Replace the upstream overview with a concise Xbox-fork README, tested video
+  rates, and the hardware and historical purchase totals used for this build.
+
+### Added
+- Experimental LCD Record/Stop touch control and elapsed timer, with a
+  separate recording worker, settings restoration, and a 720p-max memory
+  profile for simultaneous LCD/SD trials. Local recording no longer triggers
+  the remote-viewer LCD throttle. Record/Stop taps and smooth 480p display were
+  user-verified; a 34-second simultaneous clip measured 26.26 fps with zero
+  recorder drops. Simultaneous 720p remains untested.
+- Document the first microSD recording trial: LCD-disabled 480p H.264 clips,
+  measured delivery rates, memory limits, and a host-side GIF workflow.
+- Clarify the real-Xbox homebrew testing goal, current observation capabilities,
+  and planned controller/CLI/agent milestones without implying they exist yet.
+- Add a read-only Xbox observation collector with timestamped status/events,
+  optional JPEG evidence, and a manual regression checklist. No controller
+  interface or REST schema changes; HDMI lock is not treated as frame freshness.
+- Start an upstream review ledger covering 13 commits through v0.58.0, with
+  pending triage, decision rules, and source-to-adaptation commit links.
+- Add GT911 tap-to-toggle for local LCD stats, with press/release latching,
+  debounce and bounded I2C polling. Video geometry is unchanged; signal-loss
+  warnings remain visible. Touch does not send Xbox controller input.
+- Add an LCD-only developer strip with capture freshness, HDMI mode/Hz,
+  measured LCD updates/s, frame-consumer count and local/remote priority.
+  Replace stale video with a status slate, and log state/mode/viewer changes.
+- Verify live 720p Xbox input on the Waveshare 3.5-inch DSI LCD (E), fitted to
+  640x360. Add an opt-in live profile capped at 5 updates/s and service the
+  camera watchdog during the bounded diagnostic startup wait.
+- Verify the Waveshare 3.5-inch DSI LCD (E) standalone checkerboard on hardware
+  with a 576 Mb/s one-lane checkpoint, bounded bridge readback, and an opt-in
+  PLL initialization experiment. Live HDMI was subsequently verified above.
+- Opt-in ICN6211 DSI register probe and isolated test-pattern control for the
+  Waveshare 3.5-inch DSI LCD (E). The bridge answers low-power DSI commands,
+  but the LCD still does not show the framebuffer; normal builds are unchanged.
+- Opt-in Function EV DSI preview experiment for a Waveshare 3.5-inch LCD.
+  The ESP receives Xbox frames and sees the LCD touch controller, but the
+  panel has not displayed the preview; keep it disabled by default.
+- Record the DSI trial matrix and the Waveshare overlay's one-lane timing;
+  non-burst video and disabling HS EoTP changed the bars but did not display
+  the framebuffer.
+- Add an opt-in ESP DSI-host vertical-pattern diagnostic to distinguish LCD
+  controller color bars from pixels transmitted by the ESP.
+- Add opt-in standalone DSI framebuffer diagnostics and DMA/FIFO counters;
+  confirm host-generated bars reach the panel, but framebuffer video remains
+  unverified and the preview stays disabled by default.
+- Mirror Waveshare's generic ESP DSI startup sequence in the opt-in LCD trial:
+  additional bridge-control writes, a one-second settle, and DCS display-on
+  commands before DPI video. Hardware testing confirmed this still leaves the
+  3.5-inch E on color bars; normal Xbox capture firmware was restored.
+- Concise Xbox compatibility/recovery table distinguishing sustained game
+  streaming, reboot capture recovery, and the short 720p game observation.
+- Local MJPEG soak-test utility reporting frame delivery gaps and reconnects,
+  with marker-boundary tests and no saved video frames.
+- Optional ignored `.env` Wi-Fi defaults, a credential-free `.env.example`, and
+  a local Xbox build helper. Credentials are never intended for shared firmware.
+- Advanced capture diagnostics report completed-frame counts separately from
+  published FPS, plus CSI DMA configuration and buffer-relative progress at
+  stalls. These diagnostics do not fix the outstanding Xbox 480p failure.
+- Opt-in RGB capture diagnostic for comparing the existing RGB and direct-YUV
+  paths on TC358743 boards. Disabled by default; not a performance preset.
+
+### Fixed
+- Write LCD recording-overlay colors in the panel framebuffer's B,G,R byte
+  order so the record button/indicator are red, not blue; game pixels unchanged.
+- Experimental TC358743 lane selection follows the detected input bandwidth.
+  Xbox 720p-to-480p transition testing is still in progress; this is not yet a
+  validated automatic-resolution baseline.
+
 ## [0.56.1] - 2026-09-30
 
 ### Fixed

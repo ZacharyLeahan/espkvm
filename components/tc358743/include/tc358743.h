@@ -92,6 +92,9 @@ esp_err_t tc358743_set_edid_profile(tc358743_t *dev, tc358743_edid_profile_t pro
  */
 void tc358743_set_csi_uyvy422(tc358743_t *dev, bool uyvy422);
 
+/** Reconfigure how many CSI-2 data lanes carry the current video mode. */
+esp_err_t tc358743_set_csi_lanes(tc358743_t *dev, unsigned lanes);
+
 /**
  * Linux-style hotplug finish: enable_stream(true), ~150 ms, HPD high, then CSI_START pulse.
  * Call after esp_cam_ctlr_enable(); before esp_cam_ctlr_start() once HDMI can feed the bridge.

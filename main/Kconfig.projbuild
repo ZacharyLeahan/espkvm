@@ -3,7 +3,36 @@ menu "ESP-KVM"
     orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
 
     menu "Features"
+        config KVM_XBOX_BLE
+            bool "Experimental Xbox Bluetooth discovery"
+            depends on KVM_USB_XBOX && BT_NIMBLE_ENABLED && ESP_HOSTED_HOST_FEAT_BT
+            select BT_NIMBLE_CRYPTO_STACK_MBEDTLS
+            default n
+            help
+                Use mbedTLS to avoid the IDF 6.1 P4 TinyCrypt DHKey bug
+                documented in espressif/esp-hosted-mcu issue 241.
+        config KVM_XBOX_BLE_LEGACY_CP
+            bool "C6 controller already started by legacy firmware"
+            depends on KVM_XBOX_BLE
+            default n
+
+        config KVM_USB_XBOX
+            bool "Experimental original Xbox XID controller instead of keyboard/mouse"
+            default n
+            help
+                Replace the USB identity with one Xbox controller. Keyboard
+                input is mapped to controller buttons; mouse/MSC are disabled.
+                Stale state releases after 500 ms. Requires a controller-port
+                cable. Touchscreen controller overlay is not implemented.
+
         comment "Disabled features cost no flash and no RAM."
+
+        config KVM_CAPTURE_720P_MAX
+            bool "Limit capture allocations to 1280x720"
+            default n
+            help
+                Free PSRAM for simultaneous LCD and SD recording on the Xbox
+                profile. Reject larger input modes; 1080p requires this off.
 
         config KVM_ENABLE_H264
             bool "H.264 video encoding (hardware)"
@@ -48,6 +77,92 @@ menu "ESP-KVM"
                 (GC9A01, e.g. the Waveshare 1.28"), which needs the SPI pins set
                 below. Off unless switched on in settings, and it does nothing
                 when no panel is connected, so it is safe to build into every board.
+
+        config KVM_DSI_PREVIEW
+            bool "Experimental 3.5-inch Waveshare DSI HDMI preview"
+            depends on KVM_BOARD_FUNCEV
+            default n
+            help
+                Drive the 640x480 Waveshare 3.5inch DSI LCD (E) from the
+                Function EV Board's MIPI DISPLAY connector. This experimental
+                local preview is independent of the browser video stream and
+                targets up to 60 updates/s alone, at most 1 with remote viewers,
+                with measured copy-duty and thermal limits. A standalone framebuffer
+                has been verified; live capture remains experimental.
+
+        config KVM_DSI_STATUS_STRIP
+            bool "Local LCD developer status strip"
+            depends on KVM_DSI_PREVIEW
+            default y
+            help
+                Show capture freshness, HDMI mode, LCD update rate and frame
+                consumers on the local LCD only. No browser pixels are changed.
+
+        config KVM_DSI_PREVIEW_BUFFERS
+            int "LCD framebuffers (3 is an experimental memory/speed tradeoff)"
+            depends on KVM_DSI_PREVIEW
+            range 2 3
+            default 2
+            help
+                A third buffer lets rendering overlap display handoff, but
+                consumes another 921600 bytes of PSRAM. Keep two unless the
+                additional buffer improves measured performance safely.
+
+        config KVM_DSI_PREVIEW_PPA
+            bool "Experimental hardware scaler for exact RGB LCD ratios"
+            depends on KVM_DSI_PREVIEW
+            default n
+            help
+                Test PPA scaling for RGB ratios representable in sixteenths.
+                CPU scaling remains the fallback. Disabled until visual
+                flicker reported during hardware testing is resolved.
+
+        config KVM_DSI_PREVIEW_HOST_PATTERN
+            bool "DSI host vertical-bar diagnostic (replaces local preview)"
+            depends on KVM_DSI_PREVIEW
+            default n
+            help
+                Use the ESP32-P4 DSI host's internal vertical color-bar generator
+                instead of the framebuffer. This is a temporary link diagnostic:
+                if the LCD still shows horizontal bars, its pixels are not
+                coming from the ESP DSI host. Never enable in normal builds.
+
+        config KVM_DSI_PREVIEW_STANDALONE
+            bool "DSI framebuffer diagnostic without CSI capture"
+            depends on KVM_DSI_PREVIEW
+            default n
+            help
+                Bring up the display's checkerboard framebuffer without
+                starting HDMI/CSI capture. This temporary test isolates DSI
+                output from capture bandwidth; browser video is unavailable.
+
+        config KVM_DSI_PREVIEW_ICN6211_PROBE
+            bool "Read-only ICN6211 DSI register probe (no video)"
+            depends on KVM_DSI_PREVIEW_STANDALONE
+            default n
+            help
+                Request the ICN6211 vendor and device ID over low-power DSI
+                generic-read packets, with bounded waits. This is an isolated
+                bring-up diagnostic: it does not initialize the bridge or
+                output video. Leave it disabled in normal firmware.
+
+        config KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+            bool "Clear ICN6211 built-in test-pattern bit for framebuffer test"
+            depends on KVM_DSI_PREVIEW && !KVM_DSI_PREVIEW_ICN6211_PROBE
+            default n
+            help
+                After confirming the bridge ID, clear only bit 3 of its BIST
+                register and read it back before starting the checkerboard.
+                This register change is volatile; keep it off in normal builds.
+
+        config KVM_DSI_PREVIEW_ICN6211_MIPI_PLL
+            bool "Test ICN6211 PLL synchronized to the DSI clock"
+            depends on KVM_DSI_PREVIEW_ICN6211_DISABLE_BIST
+            default n
+            help
+                Unlock DSI configuration and derive the 24 MHz pixel clock
+                from a continuous 576 Mb/s DSI lane. Verify each register.
+                Isolated LCD experiment; not yet validated for normal use.
 
         config KVM_GC9A01_SPI_HOST
             int "Round SPI LCD (GC9A01) SPI host (2 = SPI2)"
@@ -207,6 +322,15 @@ menu "ESP-KVM"
                 When enabled, CSI frame timeouts log extra TC358743 register state, AVI
                 infoframe dumps, and periodic bridge status. Adds I2C traffic on error paths.
                 Boot-time SYS_STATUS lines from init are unchanged.
+
+        config KVM_CAPTURE_DEBUG_RGB
+            bool "Diagnostic: use RGB capture instead of direct YUV"
+            depends on KVM_TC358743_ADV_DEBUG && !KVM_LT6911
+            default n
+            help
+                Use the existing RGB capture and conversion path to isolate
+                format-dependent CSI failures. This increases frame memory and
+                conversion work; leave disabled for normal performance testing.
     endmenu
 
     menu "Board pins"
@@ -394,6 +518,31 @@ menu "ESP-KVM"
                 Not tied to Ethernet: a board with no wired port still answers to
                 this name over WiFi, and it is also what the certificate and the
                 device's own CA are named after.
+
+        config KVM_WIFI_DEFAULT_SSID
+            string "Default WiFi network (SSID)"
+            default ""
+            depends on KVM_WIFI
+            help
+                Initial station SSID used when NVS has no saved WiFi setting.
+
+        config KVM_WIFI_DEFAULT_PASSWORD
+            string "Default WiFi password"
+            default ""
+            depends on KVM_WIFI
+            help
+                Initial station password used when NVS has no saved WiFi setting.
+                Keep this empty in distributable firmware images.
+
+        config KVM_ETH_WIFI_FAILOVER
+            bool "Run Ethernet with WiFi fallback"
+            default n
+            depends on KVM_ETH_ENABLE && KVM_WIFI
+            help
+                Start Ethernet and WiFi station together. Ethernet has the higher
+                route priority; WiFi carries traffic whenever Ethernet is down.
+                Boards where both devices need the same SDMMC slot stay in the
+                normal single-link mode so storage and WiFi never fight for it.
 
         config KVM_ETH_RMII_CLK_GPIO
             int "RMII REFCLK GPIO (external input)"

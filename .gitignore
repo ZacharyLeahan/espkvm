@@ -36,6 +36,10 @@ build.*/
 flasher_args.json # Generated in build directory
 sdkconfig.old
 sdkconfig
+boards/*private.defaults
+.env
+.env.*
+!.env.example
 
 # ESP-IDF dependencies
 # For older versions or manual component management
@@ -110,3 +114,5 @@ version.txt
 # Scratch space for whatever a session needs on the side: device logs pulled off
 # a board, capture dumps, one-off measuring scripts. None of it is source.
 ignore/
+# Local screenshots and test evidence may contain private content.
+/observations/

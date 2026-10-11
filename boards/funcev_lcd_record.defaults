@@ -1,0 +1,4 @@
+# Experimental supplement to funcev_dsi_live.defaults, not a generic profile.
+# Keep the LCD's three CPU-rendered buffers and free capture PSRAM instead.
+# Input above 1280x720 is rejected. Do not use this profile for 1080p sources.
+CONFIG_KVM_CAPTURE_720P_MAX=y

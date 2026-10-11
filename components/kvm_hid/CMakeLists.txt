@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "usb_hid.c"
+        "usb_xbox.c"
         "mmc.c"
         "jiggler.c"
     INCLUDE_DIRS "include"

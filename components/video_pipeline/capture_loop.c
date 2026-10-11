@@ -114,14 +114,46 @@ void capture_loop_run(capture_ctx_t *c)
         return;
     }
 
+    /* Preview gets its own DSI framebuffer. A panel failure must not prevent
+     * HDMI capture or the browser console from starting. */
+    capture_dsi_preview_init();
+
     int64_t hdmi_recover_cooldown_until_us = 0;
     int64_t switch_retry_us = 0; /* after a refused codec switch */
     int64_t last_encode_us = 0;
     /* Set after anything that invalidates what clients are holding. */
     bool force_publish = true;
+#if CONFIG_KVM_TC358743_ADV_DEBUG
+    int64_t capture_sample_us = esp_timer_get_time();
+    uint32_t capture_sample_done = c->csi_dma_done_irqs;
+    uint32_t capture_sample_h = c->hres, capture_sample_v = c->vres;
+#endif
 
     while (1) {
         esp_task_wdt_reset();
+        capture_dsi_preview_tick(c->csi_dma_done_irqs);
+#if CONFIG_KVM_TC358743_ADV_DEBUG
+        /* Published FPS can be zero for a static screen. Measure the capture
+         * callbacks separately, including when no browser is connected. */
+        const int64_t sample_now = esp_timer_get_time();
+        const uint32_t sample_done = c->csi_dma_done_irqs;
+        if (c->hres != capture_sample_h || c->vres != capture_sample_v ||
+            sample_done < capture_sample_done) {
+            capture_sample_us = sample_now;
+            capture_sample_done = sample_done;
+            capture_sample_h = c->hres;
+            capture_sample_v = c->vres;
+        } else if (sample_now - capture_sample_us >= 5000000) {
+            const uint32_t elapsed_ms = (uint32_t)((sample_now - capture_sample_us) / 1000);
+            const uint32_t frames = sample_done - capture_sample_done;
+            ESP_LOGI(CAPTURE_LOG_TAG,
+                     "capture sample: %ux%u completed=%lu elapsed_ms=%lu viewers=%d",
+                     (unsigned)c->hres, (unsigned)c->vres, (unsigned long)frames,
+                     (unsigned long)elapsed_ms, (int)video_frame_viewer_count());
+            capture_sample_us = sample_now;
+            capture_sample_done = sample_done;
+        }
+#endif
         /*
          * No codec is open: every path out of here closed one and could not
          * open another, which on this device means memory. Keep the loop alive
@@ -149,6 +181,7 @@ void capture_loop_run(capture_ctx_t *c)
         if (c->mode_change_pending) {
             const uint32_t want_h = c->pending_hres;
             const uint32_t want_v = c->pending_vres;
+            c->input_hz = c->pending_hz;
             c->mode_change_pending = false;
             esp_err_t me = capture_hw_apply_mode(c, want_h, want_v);
             if (me != ESP_OK) {
@@ -256,8 +289,29 @@ void capture_loop_run(capture_ctx_t *c)
          * frame period.
          */
         if (video_frame_viewer_count() == 0) {
-            /* Nobody to encode for - but a watch set to look for words on the
-             * screen exists for exactly this state, so give it the frame. */
+            /* The local panel still needs raw frames when no browser is open.
+             * Hold the completed CSI buffer exactly as the encoder does, so
+             * free-running DMA cannot overwrite it during the small copy. */
+            if (capture_dsi_preview_due()) {
+                portENTER_CRITICAL(&c->fb_lock);
+                const int preview_idx = c->ready_fb_idx;
+                c->held_fb_idx = preview_idx;
+                portEXIT_CRITICAL(&c->fb_lock);
+                if (preview_idx >= 0 && capture_park_frame_begin()) {
+                    void *preview_src = c->fb[preview_idx];
+                    if (esp_cache_msync(preview_src, c->frame_bytes,
+                                        ESP_CACHE_MSYNC_FLAG_DIR_M2C) == ESP_OK) {
+                        capture_dsi_preview_frame(preview_src, c->hres, c->vres,
+                                                  capture_pixfmt());
+                    }
+                    capture_park_frame_end();
+                }
+                portENTER_CRITICAL(&c->fb_lock);
+                c->held_fb_idx = -1;
+                portEXIT_CRITICAL(&c->fb_lock);
+            }
+            /* A watch set to look for words on the screen exists for exactly
+             * this state too, so keep giving it the frame. */
             capture_screentext_idle(c);
             continue;
         }
@@ -356,6 +410,10 @@ void capture_loop_run(capture_ctx_t *c)
         esp_err_t ee = codec->encode(c, src, force_publish);
         if (ee == ESP_OK) {
             force_publish = false;
+            /* Publish remote output first. The LCD has a much smaller budget
+             * while consumers exist, and must read the original raw buffer
+             * rather than the codec's optional reordered YUV copy. */
+            capture_dsi_preview_frame(c->fb[hidx], c->hres, c->vres, capture_pixfmt());
         } else if (codec != capture_codec_mjpeg() &&
                    (ee == ESP_ERR_NO_MEM || capture_h264_encoder_failed())) {
             /*

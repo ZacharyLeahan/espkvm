@@ -2665,6 +2665,45 @@ static esp_err_t ws_send_frame(httpd_handle_t server, int fd, httpd_ws_frame_t *
     return err;
 }
 
+/* A complete JPEG can be well over 64 KiB.  Passing it to lwIP as one
+ * WebSocket write works on Ethernet, but fills the small ESP-Hosted WiFi
+ * transport pool before Tailscale ACKs drain it.  RFC 6455 fragmentation lets
+ * us pace that same logical message without changing the browser protocol: the
+ * WebSocket API delivers the reassembled packet to JavaScript. */
+static esp_err_t ws_send_paced(httpd_handle_t server, int fd, const httpd_ws_frame_t *frame)
+{
+    const size_t piece = 1024;
+    const size_t burst = 4 * 1024;
+    if (frame->len <= piece) {
+        httpd_ws_frame_t whole = *frame;
+        return ws_send_frame(server, fd, &whole);
+    }
+
+    size_t off = 0;
+    while (off < frame->len) {
+        const size_t n = (frame->len - off < piece) ? frame->len - off : piece;
+        httpd_ws_frame_t part = {
+            .final = off + n == frame->len,
+            .fragmented = true,
+            .type = off == 0 ? frame->type : HTTPD_WS_TYPE_CONTINUE,
+            .payload = frame->payload + off,
+            .len = n,
+        };
+        const esp_err_t err = ws_send_frame(server, fd, &part);
+        if (err != ESP_OK) {
+            return err;
+        }
+        off += n;
+        if (off < frame->len && off % burst == 0) {
+            /* Keep each burst below the legacy hosted transport's practical
+             * pool limit. One scheduler tick then lets WiFi, WireGuard and TCP
+             * return those buffers before the next burst arrives. */
+            vTaskDelay(1);
+        }
+    }
+    return ESP_OK;
+}
+
 static void ws_send_binary(int fd, const uint8_t *data, size_t len)
 {
     httpd_ws_frame_t frame = {
@@ -3040,7 +3079,27 @@ static esp_err_t root_get(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(req, "ETag", etag);
-    return httpd_resp_send(req, index_html_gz_start, len);
+
+    /* Do not hand the complete console bundle to send() in one call.  The
+     * native Tailscale/WireGuard netif has a deliberately small transmit
+     * window; a single 100+ KiB write can fill it before ACKs drain the queue,
+     * causing the HTTP server to reset the connection after its send timeout.
+     * Short HTTP chunks apply natural back-pressure and work identically on
+     * Ethernet, WiFi, and the tailnet. */
+    const size_t chunk_size = 1024;
+    for (size_t off = 0; off < len; off += chunk_size) {
+        const size_t n = (len - off < chunk_size) ? len - off : chunk_size;
+        const esp_err_t err = httpd_resp_send_chunk(req, index_html_gz_start + off, n);
+        if (err != ESP_OK) {
+            return err;
+        }
+        /* Give the WireGuard and TCP/IP tasks time to encrypt, transmit and
+         * acknowledge this chunk before the next one consumes the tiny send
+         * window.  About one second total for the embedded console is a much
+         * better outcome than timing out after the first three kilobytes. */
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 /*
@@ -3258,6 +3317,27 @@ static bool stream_peer_disconnected(httpd_req_t *req)
     return false;
 }
 
+/* esp_http_server's chunk API is an HTTP transfer chunk, not a bounded network
+ * write: handing it a 100-250 KiB JPEG at once can exhaust the ESP-Hosted SDIO
+ * pool before WiFi ACKs return. Split the JPEG while preserving the multipart
+ * Content-Length seen by the browser (HTTP chunk framing is decoded first). */
+static esp_err_t stream_send_paced(httpd_req_t *req, const uint8_t *data, size_t len)
+{
+    const size_t piece = 1024;
+    const size_t burst = 4 * 1024;
+    for (size_t off = 0; off < len; off += piece) {
+        const size_t n = (len - off < piece) ? len - off : piece;
+        const esp_err_t err = httpd_resp_send_chunk(req, (const char *)data + off, n);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (off + n < len && (off + n) % burst == 0) {
+            vTaskDelay(1);
+        }
+    }
+    return ESP_OK;
+}
+
 static void stream_worker_task(void *arg)
 {
     httpd_req_t *req = (httpd_req_t *)arg;
@@ -3339,7 +3419,7 @@ static void stream_worker_task(void *arg)
             se = httpd_resp_send_chunk(req, hdr, hl);
             if (se == ESP_OK) {
                 opened = true;
-                se = httpd_resp_send_chunk(req, (const char *)f.data, f.len);
+                se = stream_send_paced(req, f.data, f.len);
             }
             if (se == ESP_OK) {
                 se = httpd_resp_send_chunk(req, "\r\n--frame\r\n", 11);
@@ -3952,7 +4032,7 @@ static void video_pump_task(void *arg)
 
         for (int i = 0; i < target_count; i++) {
             const int64_t send_t0 = esp_timer_get_time();
-            const esp_err_t send_r = ws_send_frame(server, targets[i], &frame);
+            const esp_err_t send_r = ws_send_paced(server, targets[i], &frame);
             const int64_t send_ms = (esp_timer_get_time() - send_t0) / 1000;
             if (send_ms > 500) {
                 /* Diagnostic: a send this slow is the watchdog culprit. */

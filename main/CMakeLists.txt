@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c"
+    SRCS "main.c" "lcd_record_control.c" "xbox_ble.c"
     INCLUDE_DIRS "."
     REQUIRES
         video_pipeline
@@ -21,3 +21,8 @@ idf_component_register(
         esp_timer
         espcoredump
 )
+# Optional dependencies must be attached after registration: Kconfig values
+# are not available during IDF's early dependency-expansion pass.
+if(CONFIG_KVM_XBOX_BLE)
+    idf_component_optional_requires(PRIVATE bt espressif__esp_hosted)
+endif()

@@ -19,6 +19,14 @@
 
 #define CAPTURE_LOG_TAG "video"
 
+/* Optional local DSI preview; it consumes the held raw frame without changing
+ * the browser codec or its frame store. Stubs keep non-DSI boards unchanged. */
+void capture_dsi_preview_init(void);
+bool capture_dsi_preview_due(void);
+void capture_dsi_preview_tick(uint32_t completed);
+void capture_dsi_preview_frame(const void *src, uint32_t width, uint32_t height,
+                               const capture_pixfmt_t *fmt);
+
 /*
  * Frame-buffer ring depth. With a synchronous encode the encoder holds one
  * buffer for the whole encode; two buffers then leave the free-running CSI just
@@ -42,8 +50,13 @@
  * every resolution change would fragment PSRAM and can fail exactly when a
  * machine switches from its BIOS mode to the desktop.
  */
+#if CONFIG_KVM_CAPTURE_720P_MAX
+#define CAPTURE_MAX_H_RES 1280u
+#define CAPTURE_MAX_V_RES 720u
+#else
 #define CAPTURE_MAX_H_RES 1920u
 #define CAPTURE_MAX_V_RES 1080u
+#endif
 #if CAPTURE_DIRECT_ENCODE
 /* On the direct-encode board the encoder reads the frame at macroblock-aligned
  * height, so pad the allocation up to the next multiple of 16 rows (1080 -> 1088).
@@ -73,6 +86,8 @@ typedef struct {
     /** Mode currently programmed into the CSI bridge. */
     uint32_t hres;
     uint32_t vres;
+    /** Refresh rate used to size the active CSI link (0 when unknown). */
+    uint32_t input_hz;
     size_t frame_bytes;
     void *fb[CAPTURE_FB_COUNT];
     /** Where the DMA writes a frame that is being dropped. Ours, allocated once:
@@ -112,6 +127,7 @@ typedef struct {
     volatile bool mode_change_pending;
     volatile uint32_t pending_hres;
     volatile uint32_t pending_vres;
+    volatile uint32_t pending_hz;
     /** The input mode needs more than the CSI lanes carry: no frames will come. */
     volatile bool mode_too_fast;
 } capture_ctx_t;
