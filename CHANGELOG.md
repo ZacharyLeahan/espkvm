@@ -8,6 +8,8 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- Add the receipt-verified eBay Xbox controller-port adapter, seller, price,
+  listing link, and DEVICE-port cabling to the README hardware list.
 - Refresh the README with the real-Xbox video/input demo, measured recording
   results, merged-main entry point, and explicit dependency/reference credits.
 - Add an inputs-only LCD mode immediately after Bluetooth setup in the tap

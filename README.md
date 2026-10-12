@@ -12,7 +12,7 @@ This is an **original Xbox-specific fork of [espkvm/espkvm](https://github.com/e
 - **Gameplay recording:** touchscreen Record/Stop, elapsed timer, and microSD video for later MP4/GIF export. A simultaneous 480p trial measured about **26 fps recording and 26-27 LCD updates/sec**, with zero recorder-reported drops in that trial.
 - **Developer/agent access:** LAN/Tailscale viewing, a read-only evidence collector, and bounded network button sequences with automatic release. The trick demos used ad-hoc commands, not a shipped named-macro library or autonomous test runner.
 
-Our three main hardware purchases totaled **$220.03** (ESP board, HDMI capture board, and touchscreen; cable/accessory costs excluded). [Parts and historical prices](#our-hardware) · [Controller setup](docs/XBOX-REMOTE-CONTROLLER.md) · [Recording](docs/SD-RECORDING.md) · [Testing tools](docs/XBOX-TESTING.md).
+Our three main hardware purchases totaled **$220.03**, or **$226.28 including the eBay Xbox controller-port adapter** (other cables/accessories excluded). [Parts and historical prices](#our-hardware) · [Controller setup](docs/XBOX-REMOTE-CONTROLLER.md) · [Recording](docs/SD-RECORDING.md) · [Testing tools](docs/XBOX-TESTING.md).
 
 ## Why this fork
 
@@ -91,10 +91,14 @@ These are observations, not blanket compatibility guarantees. Zero reconnects do
 | **Browser-capture hardware total** | | | **$180.86** |
 | Waveshare 3.5-inch DSI LCD (E), 640×480 capacitive touch | Optional local HDMI preview via MIPI DISPLAY; tap-to-toggle stats | Amazon | $39.17 |
 | **All three purchases** | | | **$220.03** |
+| [Female USB to Xbox controller port adapter cable, 1st gen original Xbox, 70 cm](https://www.ebay.com/itm/147474591575) | Connects the original Xbox controller port to USB-A female for our emulated controller | eBay, seller `nextgendeals07` | $6.25 |
+| **Including Xbox controller-port adapter** | | | **$226.28** |
 
-Prices are historical order totals verified against the September 18 (AliExpress) and September 30 (Amazon) 2026 confirmation emails, not current quotes. The LCD's item price was $36.95 before the $39.17 order total. This excludes the Xbox HDMI adapter, cables, power supply, and case.
+Prices are historical order totals verified against the September 18 (AliExpress), September 30 (Amazon), and October 2 (eBay) 2026 confirmation emails, not current quotes or availability guarantees. The LCD's item price was $36.95 before the $39.17 order total. The eBay cable was $5.89 + $0.36 sales tax, with free shipping. Totals exclude the Xbox HDMI adapter, USB-A-to-USB-C data cable, microSD card, controller, power supply, other cables, and case.
 
 Connect Xbox HDMI → C790 → ESP **MIPI CAMERA**, and ESP **MIPI DISPLAY** → LCD. Both ribbon connections must use the correct pinout/contact orientation; disconnect power before handling them. USB-Serial-JTAG is used for power/flashing. The LCD needs no HDMI splitter and is optional for browser capture.
+
+For controller input: **Xbox controller port → eBay adapter's USB-A female → USB-A male to USB-C male data cable → ESP DEVICE port**. The eBay adapter is not a direct USB-C cable and does not itself translate controller protocols; our Xbox-mode firmware provides XID emulation. Do not connect this path to USB-Serial-JTAG. See [controller setup](docs/XBOX-REMOTE-CONTROLLER.md).
 
 ## Build and use
 
