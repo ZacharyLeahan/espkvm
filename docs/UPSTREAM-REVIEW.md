@@ -113,6 +113,60 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## Isolated audio workload comparison (2026-10-17)
+
+Two 60-second passes isolated live PCM alone, PCM plus one H.264 viewer, and
+PCM plus SD recording, in audio/video/SD/SD/video/audio order. Firmware and the
+40 ms browser queue stayed unchanged; H.264 target was 4000 kbit/s with a
+30-fps cap. Each video viewer ran for 55 seconds within its PCM trial.
+An existing browser viewer was paused for the tests and resumed afterward.
+Every trial checked consumer counts before starting and sampled them every
+15 seconds: audio-only had zero video clients/consumers; video trials had one
+WebSocket client while the probe ran; SD trials had zero WebSocket clients
+and one recorder consumer. Capture-overrun samples remained zero throughout.
+Earlier comparisons did not enforce absence of unrelated viewers, so their
+frame rates are not directly comparable to this series.
+
+| Trial | Confirmed PCM gaps | Longest successful PCM send | PCM received over approximately 60 s | Live video |
+| --- | --- | --- | --- | --- |
+| 1: Audio alone | 90 ms | 58.944 ms | 59.890 s | - |
+| 2: Audio + video | 160 ms | 85.123 ms | 59.820 s | 20.1 fps / 117 kbit/s |
+| 3: Audio + SD | 305 ms | 128.580 ms | 59.685 s | - |
+| 4: Audio + SD | 545 ms | 232.527 ms | 59.445 s | - |
+| 5: Audio + video | 165 ms | 124.407 ms | 59.810 s | 19.9 fps / 117 kbit/s |
+| 6: Audio alone | 50 ms | 48.847 ms | 59.930 s | - |
+
+**Decision:** neither video nor recording is necessary for PCM queue loss;
+audio-only gaps reproduce it. Added work increased loss in both passes, most
+strongly with SD recording in this sample. The capture counters do not point
+to lost I2S clocks or capture overruns. This narrows investigation to delivery
+and scheduling/backpressure, but does not distinguish Wi-Fi/TCP waiting from
+task preemption: elapsed send time includes both. Do not identify the SD card
+or network as a proven sole cause, or claim a firmware fix from this test.
+
+**Source limitation:** the HDMI source was silent and low-motion. Network
+observations had zero active frames in the audio-only/SD trials and only one
+in each video trial. Both SD clips passed strict H.264/AAC decoding with zero
+recorder video/audio drops, but the helper correctly returned failure for
+`Decoded audio has no samples above the activity threshold`. These are valid
+transport/container observations, not successful audible-content checks or
+busy-game/movie stress tests. That failure remains in the saved reports.
+
+The two clips were `VIDEO/up-005979.ts` (416 video frames, 2,382,336 bytes) and
+`VIDEO/up-006073.ts` (336 frames, 2,400,572 bytes). Both stopped on their 60-second
+limits; original settings were restored after each pass. Source media and logs
+remain local under `/tmp/espkvm-load-isolation-01/`, including `summary.json`,
+each trial's `load.json`, `counters.log`, and PCM observation or recording report.
+The SD file SHA-256 values are:
+
+- `29451bbb49b66a367641073fafd2fd44071c1d01c4c374f27a4890e428bbbe1b`
+- `842d6e5657e465dfa9d47683db920749eedc28b03b88b1d71bb171a5ad27bbe2`
+
+No firmware or API changes were needed. Next: profile the audio-only delivery
+baseline to separate scheduling delay from socket backpressure, then repeat
+under an audible moving source and controlled viewer counts. Keep live PCM
+continuity and physical latency open in the acceptance ledger.
+
 ## H.264 bitrate comparison (2026-10-17)
 
 The retained 40 ms queue and diagnostics firmware ran four 60-second SD/PCM
@@ -156,9 +210,9 @@ stopped and original settings restored. Saved TS SHA-256 values, in trial order:
 - `bff8c7d130e9a7b11f67dab9389faf3af8e1e9b06b1450276f45cadd55565ae2`
 - `ebbfd741a2d625086d30ca392af4b78187de52b728942c45464e1334b46a9ec1`
 
-Next useful isolation: compare live PCM alone against PCM plus video and PCM
-plus SD recording, then correlate frame-size/send-time distributions with audio
-gaps. Keep the streaming acceptance gap open; the bitrate test did not close it.
+The isolated-workload comparison above follows this test. It reproduces gaps
+even with audio alone; scheduling and transport attribution remain open.
+Neither this bitrate comparison nor the isolation check closes live continuity.
 
 ## Live PCM queue diagnosis (2026-10-17)
 
