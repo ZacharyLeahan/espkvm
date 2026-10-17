@@ -115,6 +115,8 @@ rerun for this documentation update.
 
 ## TCP queue and path correlation (2026-10-17)
 
+Instrumentation and evidence: [1d44bd3](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1d44bd3).
+
 The default-off `CONFIG_KVM_HTTP_TX_DIAGNOSTICS` option samples stalled plain
 HTTP PCM sends. It records free TCP send bytes, queued/unacknowledged/unsent
 segments, advertised window, last acknowledged/next sequence, congestion window,
