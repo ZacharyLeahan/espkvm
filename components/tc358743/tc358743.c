@@ -26,6 +26,8 @@ static const char *TAG = "tc358743";
 #define TC358743_PROBE_TRIES 3
 #define TC358743_PROBE_GAP_MS 5
 #define TC358743_PROBE_TIMEOUT_MS 50
+/* A wedged bridge must release the shared bus and the capture lock. */
+#define TC358743_I2C_TIMEOUT_MS 200
 
 #define CHIPID 0x0000
 /* The register holds the chip id in the top byte and the revision in the
@@ -291,6 +293,8 @@ struct tc358743 {
     bool csi_uyvy422;
     tc358743_edid_profile_t edid_profile;
     bool i2c_ok; /* tracks I2C health so a wedged bus is logged once, not per-register */
+    bool timing_poll;
+    esp_err_t timing_error; /* first failure: do not spend another timeout per register */
 };
 
 /* Largest single register write: the 128-byte EDID block plus the 2-byte address. */
@@ -324,7 +328,13 @@ void tc358743_cfg_defaults_waveshare_pi(tc358743_cfg_t *c)
  * wedged bus here instead of one line per register. */
 static void i2c_note_result(tc358743_t *d, uint16_t reg, esp_err_t err)
 {
+    if (d->timing_poll && err != ESP_OK && d->timing_error == ESP_OK) {
+        d->timing_error = err;
+    }
     if (err == ESP_OK) {
+        if (!d->i2c_ok) {
+            ESP_LOGI(TAG, "I2C works again");
+        }
         d->i2c_ok = true;
         return;
     }
@@ -337,6 +347,9 @@ static void i2c_note_result(tc358743_t *d, uint16_t reg, esp_err_t err)
 
 static esp_err_t i2c_write_reg(tc358743_t *d, uint16_t reg, const void *data, size_t len)
 {
+    if (d->timing_poll && d->timing_error != ESP_OK) {
+        return d->timing_error;
+    }
     if (len > TC358743_MAX_WRITE - 2) {
         ESP_LOGE(TAG, "i2c_write_reg: len %u exceeds max %u", (unsigned)len, TC358743_MAX_WRITE - 2);
         return ESP_ERR_INVALID_SIZE;
@@ -345,15 +358,18 @@ static esp_err_t i2c_write_reg(tc358743_t *d, uint16_t reg, const void *data, si
     buf[0] = (uint8_t)(reg >> 8);
     buf[1] = (uint8_t)(reg & 0xff);
     memcpy(buf + 2, data, len);
-    esp_err_t err = i2c_master_transmit(d->i2c, buf, len + 2, -1);
+    esp_err_t err = i2c_master_transmit(d->i2c, buf, len + 2, TC358743_I2C_TIMEOUT_MS);
     i2c_note_result(d, reg, err);
     return err;
 }
 
 static esp_err_t i2c_read_reg(tc358743_t *d, uint16_t reg, void *data, size_t len)
 {
+    if (d->timing_poll && d->timing_error != ESP_OK) {
+        return d->timing_error;
+    }
     uint8_t addr[2] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xff)};
-    esp_err_t err = i2c_master_transmit_receive(d->i2c, addr, sizeof(addr), data, len, -1);
+    esp_err_t err = i2c_master_transmit_receive(d->i2c, addr, sizeof(addr), data, len, TC358743_I2C_TIMEOUT_MS);
     i2c_note_result(d, reg, err);
     return err;
 }
@@ -896,6 +912,10 @@ esp_err_t tc358743_get_timings(tc358743_t *d, tc358743_timings_t *out)
     ESP_RETURN_ON_FALSE(d && out, ESP_ERR_INVALID_ARG, TAG, "args");
 
     memset(out, 0, sizeof(*out));
+    /* The caller serializes bridge access. A failed read is not HDMI loss;
+     * skip the remaining reads/writes, including optional audio diagnostics. */
+    d->timing_poll = true;
+    d->timing_error = ESP_OK;
     out->hact = tc358743_read_hact_vact_htotal(d, &out->vact, &out->htotal, &out->vtotal);
 
 #if CONFIG_KVM_ENABLE_AUDIO && CONFIG_KVM_TC358743_ADV_DEBUG
@@ -944,7 +964,11 @@ esp_err_t tc358743_get_timings(tc358743_t *d, tc358743_timings_t *out)
         const uint32_t hz = (10000u + interval / 2u) / interval;
         out->hz = hz <= 255u ? (uint8_t)hz : 0u;
     }
-    return ESP_OK;
+    d->timing_poll = false;
+    if (d->timing_error != ESP_OK) {
+        memset(out, 0, sizeof(*out));
+    }
+    return d->timing_error;
 }
 
 esp_err_t tc358743_get_avi_color_format(tc358743_t *d, uint8_t *out_y)

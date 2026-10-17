@@ -664,7 +664,15 @@ capture_ctx_t *capture_hw_init_start(void)
     uint32_t hres = CAPTURE_MAX_H_RES;
     uint32_t vres = CAPTURE_MAX_V_RES;
     kvm_bridge_timings_t t = {0};
-    if (kvm_bridge_get_timings(&s_cap.bridge, &t) == ESP_OK && kvm_bridge_timings_valid(&t)) {
+    const bool got = kvm_bridge_get_timings(&s_cap.bridge, &t) == ESP_OK && kvm_bridge_timings_valid(&t);
+    /* Keep the monitor alive if a source boots beyond our allocated buffers.
+     * csi_create retains its own bounds guard; a later supported mode can then
+     * be selected by the normal monitor instead of requiring a reboot. */
+    if (got && (t.hact > CAPTURE_MAX_H_RES || t.vact > CAPTURE_MAX_V_RES ||
+                t.hact < 320u || t.vact < 200u)) {
+        ESP_LOGW(CAPTURE_LOG_TAG, "input %ux%u is out of range - starting at %ux%u",
+                 t.hact, t.vact, hres, vres);
+    } else if (got) {
         hres = t.hact;
         vres = t.vact;
         s_cap.signal_present = true;

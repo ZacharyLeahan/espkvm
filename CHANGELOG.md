@@ -9,6 +9,10 @@ bumps the patch).
 
 ### Fixed
 
+- Bound HDMI bridge register transfers and stop a failed timing poll after its
+  first error, preserving audio PLL recovery. Keep capture initialization alive
+  when a source starts in an oversized mode so a supported mode can recover.
+
 - Bind audio streams to their originating login session so logout, password
   changes and session revocation stop capture.
 
