@@ -164,6 +164,21 @@ change and after enabling login during a previously unauthenticated capture.
 Those device-level checks remain outstanding; no login settings were changed
 on the user's device during this validation.
 
+## Publication check
+
+The renamed `ZacharyLeahan/espkvm-xbox` repository uses `main` as its default;
+`xbox-experiments` retains its earlier published tip. A fresh recursive shallow
+clone of published commit `17cbd3fe7da00bc731c8f2a02c170994a6b3ffd1` succeeded
+with a clean worktree and fetched both exact submodule revisions:
+
+- Console: `03f0a719ae272c2fd5ed2ed60000c26db68fde50` from the Xbox console fork.
+- Microlink: `d6865e1c7ebd5ad8f158029385e93dcb36d220b0` from the existing fork.
+
+The API skill contract is published at
+[002ce16](https://github.com/ZacharyLeahan/espkvm-skills-xbox/commit/002ce16977254490d7cc4a74232ade0738fab180).
+GitHub Actions returned no runs for this push at verification time; the build
+and test outcomes above are local/hardware results, not a hosted CI pass.
+
 ## Remaining limits
 
 Subjective listening quality, correct recognition of game sounds, lip sync,
