@@ -1,6 +1,6 @@
 # ESP-KVM for the Original Xbox
 
-[espkvm-xbox](https://github.com/ZacharyLeahan/espkvm-xbox) is an original Xbox fork of [ESP-KVM](https://github.com/espkvm/espkvm): HDMI capture, browser viewing and audio, a local touchscreen, microSD recording, and controller input on a real console. The goal is repeatable homebrew testing by people and coding agents.
+[espkvm-xbox](https://github.com/ZacharyLeahan/espkvm-xbox) is an original Xbox fork of [ESP-KVM](https://github.com/espkvm/espkvm): HDMI capture, browser viewing and audio, a local touchscreen, microSD video recording, and controller input on a real console. The goal is repeatable homebrew testing by people and coding agents.
 
 The maintained Xbox branch is [`main`](https://github.com/ZacharyLeahan/espkvm-xbox/tree/main). Feature branches hold work under review; the `upstream` remote tracks the original ESP-KVM project, including `upstream/main`. We review upstream changes selectively in the [adaptation ledger](docs/UPSTREAM-REVIEW.md).
 
@@ -8,8 +8,8 @@ The maintained Xbox branch is [`main`](https://github.com/ZacharyLeahan/espkvm-x
 
 - **Video:** 480p and 720p Xbox HDMI capture, LAN/Tailscale viewing, and optional 640×480 touchscreen preview. The 720p picture is scaled to 640×360 on the LCD.
 - **Controller input:** the ESP's DEVICE USB port emulates an original Xbox controller, driven by browser keys, proportional touchscreen sticks, a Bluetooth Xbox Series controller, or bounded network input sequences with automatic release.
-- **HDMI audio:** opt-in stereo PCM capture from the C790's separate I2S connector, browser playback with volume/meter and bounded reconnect, plus a tool that saves WAV evidence. The camera ribbon carries video only.
-- **Touchscreen and recording:** stats, controller controls, Bluetooth setup, ordered input history, clean-screen mode, and Record/Stop to microSD for later MP4/GIF export on a computer.
+- **HDMI audio:** opt-in stereo PCM capture from the C790's separate I2S connector, browser playback with volume/meter and bounded reconnect, plus a tool that saves WAV evidence on a computer. The camera ribbon carries video only.
+- **Touchscreen and recording:** stats, controller controls, Bluetooth setup, ordered input history, clean-screen mode, and video-only Record/Stop to microSD for later MP4/GIF export on a computer. Audio is not included in these recordings.
 - **Testing tools:** a read-only video evidence collector and bounded audio recording. An agent triggered kickflips and a kickflip → manual → kickflip sequence on the real Xbox; the player confirmed the results. Those demos used ad-hoc commands.
 
 ## Evidence and limits

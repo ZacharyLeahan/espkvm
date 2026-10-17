@@ -6,6 +6,36 @@ Experimental. Keep a private
 known-good firmware backup and restore it after testing. Never publish local
 sdkconfig files or firmware containing network credentials.
 
+## Audio track check (2026-10-16)
+
+**Record/Stop currently saves video only, even when HDMI audio is enabled.**
+A fresh bounded eight-second recording was saved on the microSD as
+`VIDEO/up-001764.ts`, then downloaded and inspected with `ffprobe`:
+
+- 2,862,300 bytes, 7.983733 seconds, 1280x720 H.264, 178 recorder frames.
+- Exactly one video stream and **zero audio streams**; zero recorder-reported
+  video drops. This says nothing about subjective smoothness.
+- During recording, a separate network PCM capture received 235,200 stereo
+  frames (4.9 seconds at 48 kHz) and detected activity. The source therefore
+  reached the audio capture path; it was not written into the card's video file.
+- Original video settings were restored and the audio listener was released.
+  The test clip remains on the card. Media and raw results stay in ignored
+  local evidence storage; this public note contains only test metadata.
+
+File SHA-256: `92cb56b0990ad17421288a66b6a9c96afcc12bc238dbd411f96fe70e55385a58`.
+
+```sh
+ffprobe -v error -show_entries stream=index,codec_type,codec_name,sample_rate,channels,width,height:format=duration,size -of json clip.ts
+```
+
+Code inspection agrees: `ts_mux.c` declares one H.264 stream, `kvm_record.c`
+feeds only video frames into it, and `ts_to_mp4.c` produces only a video track.
+The four existing recorder host tests passed, but they cover video/container,
+frame-buffer and subtitle behavior, not audio. The separate WAV tool saves on
+the computer running it. Adding microSD audio requires a recorder audio input,
+timestamps, an audio track/container format, and matching export support;
+turning on browser audio cannot supply that integration.
+
 ## Tested on 2026-10-04
 
 Function EV P4 + C790, Wi-Fi, 720x480p60 Xbox input, no browser viewers:

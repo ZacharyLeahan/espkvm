@@ -179,6 +179,13 @@ The API skill contract is published at
 GitHub Actions returned no runs for this push at verification time; the build
 and test outcomes above are local/hardware results, not a hosted CI pass.
 
+## microSD recording follow-up
+
+A subsequent eight-second recording test found one H.264 video track and zero
+audio tracks in the saved microSD file, while separate live PCM capture showed
+activity. The earlier WAV evidence in this report was saved on the computer,
+not the ESP card. See the [saved-file check](SD-RECORDING.md#audio-track-check-2026-10-16).
+
 ## Remaining limits
 
 Subjective listening quality, correct recognition of game sounds, lip sync,

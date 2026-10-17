@@ -6,6 +6,11 @@ The remote viewer can receive stereo PCM from the C790 through the ESP32-P4.
 The touchscreen does not need speakers. This implementation is opt-in and needs
 separate I2S wiring; the CSI ribbon carries video only.
 
+**The ESP's microSD Record feature currently saves video only.** Browser audio
+and `tools/observe_audio.py` are separate: the latter saves its WAV on the
+computer running the tool. They do not add an audio track to the card recording.
+See the [saved-file test](SD-RECORDING.md#audio-track-check-2026-10-16).
+
 Software validation: firmware build with audio enabled, browser playback of a
 synthetic 440 Hz mock source, network-chunk reassembly and playback queue tests,
 and bounded WAV evidence capture. Live C790 capture has now produced non-silent
