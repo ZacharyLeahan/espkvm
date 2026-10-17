@@ -285,6 +285,37 @@ Ethernet-only profiles and both Function EV revisions. Later changes in this
 checkpoint are documentation only; physical and authenticated acceptance gates
 remain open.
 
+## Audible movie validation (2026-10-17)
+
+The user started continuous movie playback on the combined adaptation image.
+A five-second network PCM observation delivered 4.61 seconds at 48 kHz,
+201,959 active frames, peak 0.13965 and RMS 0.00953. This supersedes the earlier
+silent-source limitation; activity is measured, not a subjective listening test.
+
+Three bounded 30-second microSD trials establish the following:
+
+| Trial | Result |
+| --- | --- |
+| Parallel network PCM | `VIDEO/up-000314.ts`, 8,045,272 bytes, 396 video frames. The AAC track independently decoded to 1,442,816 stereo frames (30.0587 s), peak 0.08334, RMS 0.00674 and 2,335,986 active samples. Parallel PCM delivered 29.895 s with activity. The combined check **failed** on an H.264 macroblock decode error despite recorder counters reporting zero drops. |
+| SD only | `VIDEO/up-000375.ts`, 8,530,500 bytes, 461 video frames. Both 1280x720 H.264 and stereo 48 kHz AAC decoded with errors fatal. Audio: 1,440,768 frames (30.016 s), peak 0.15478, RMS 0.00341 and 815,016 active samples. Zero reported video/audio drops; 287 silence/padding frames. Both track timestamps start at 0.7 s; AAC packet gaps are within 1 microsecond rounding. |
+| Parallel network PCM repeat | `VIDEO/up-000430.ts`, 7,632,988 bytes, 386 video frames. Both tracks decoded successfully. Stereo 48 kHz AAC: 1,441,792 frames (30.0373 s), peak 0.08510, RMS 0.00625 and 1,714,259 active samples. Zero reported video/audio drops; 646 silence/padding frames. Parallel PCM delivered 29.855 s with activity. Track starts match; AAC packet gaps remain within 1 microsecond rounding. |
+
+Both successful saved clips therefore contain real source audio, including
+while network PCM is active. The error did not recur in the parallel repeat,
+which does not establish its cause or resolve intermittent corruption. The first trial's
+video error remains unresolved; zero drop counters alone do not establish a
+clean recording. Each test stopped its own recorder and restored video settings.
+Local evidence: `/tmp/espkvm-movie-sd-verify-02` and
+`/tmp/espkvm-movie-sd-verify-03`, plus the successful parallel repeat in
+`/tmp/espkvm-movie-sd-verify-04`. Captured media is not published.
+The SD-only TS SHA-256 is
+`9a8b7985a2a3ab91a02524e5388543542dfe03f39ad9c3a8b1b85bfc73b46479`.
+
+A separate 15-second LAN MJPEG probe received 65 frames (4.3 fps), negotiated
+ACKs and remained connected. This does not establish H.264 browser performance.
+Perceptual A/V synchronization, physical delay, authenticated HTTPS media,
+physical HDMI recovery and longer combined-load endurance remain open.
+
 ## Video adaptation progress (2026-10-16)
 
 This implementation update follows the reconciliation above; it does not mark
