@@ -48,6 +48,69 @@ submodule just to update this ledger; those are separate implementation steps.
 - This reconciliation fetched history and inspected source/dependency diffs. New **Pending** recommendations are not approval to integrate. No firmware, console bundle, dependency pin, device setting or installed image was changed; no new hardware/performance validation is claimed.
 - The inventory tip marks what we listed, not what we adopted or fully reviewed.
 
+## Follow-up reconciliation (2026-10-16)
+
+Fetched all three upstream remotes again without merging. Firmware remains
+`4c626628b8f7fdf225edc168ca6a1d3d423c2fa5`, console remains
+`48c58b037ac90504db677e83f03fa731b41bb664`, and Microlink `idf6` remains
+`5129dc2735419ec54b74a95d48193ff862f29338`. **No new upstream commits** were
+found beyond the inventory above. The inventory counts and pins above describe
+its original baseline, not the current working tree.
+
+The local `upstream-reliability-xbox` branches now contain implementation work.
+This status table supersedes older "Pending" / "Not implemented" statements
+for these specific subsets. Local commit links are provenance references;
+publication, parent dependency pins and device installation are not established
+by this reconciliation.
+
+| Subset | Current local state | Remaining acceptance work |
+| --- | --- | --- |
+| `48c22d3`: bounded bridge I2C, failed timing reads and unsupported boot modes | Adapted in firmware [8d94230](https://github.com/ZacharyLeahan/espkvm-xbox/commit/8d942304e8631b0ca37bf34e76d7e7e5fab61979). Preserves corrected HDMI audio registers and PLL restoration. | Prior implementation checks: 82 injected failure/recovery cases and audio-enabled build passed. Repeated physical reconnects, oversized-to-supported mode recovery and concurrent SD audio remain to verify. |
+| Console `2b6907c`, `e585e98`, `863429f`: initial settings section, grouping, safe drafts and card wording | Adapted in console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07). Saves are serialized and newer/failed drafts survive. Parent pin is not yet advanced. | Prior implementation checks: typecheck, 74 console tests and production build passed. Integrated browser/device validation remains. |
+| Microlink receive queue, endpoint validation, handshake time, TLS cleanup, core locks and framed JSON | Six local cherry-picks: [56e232d](https://github.com/ZacharyLeahan/microlink/commit/56e232d80f50ec34c9a680374ba3db737fb2c2e6), [b3bbe2f](https://github.com/ZacharyLeahan/microlink/commit/b3bbe2f02ca1f78e6ceb812fa8d9936728ecf213), [ccf5b19](https://github.com/ZacharyLeahan/microlink/commit/ccf5b196a19c594878b16bbf30c02d9f09a26e75), [5adc0f4](https://github.com/ZacharyLeahan/microlink/commit/5adc0f4594de8d8dd1de2b2618c2c46068d6157d), [dde0837](https://github.com/ZacharyLeahan/microlink/commit/dde08378148bae2597a5679b15d61c6ad3acc3a4), [d9b6eca](https://github.com/ZacharyLeahan/microlink/commit/d9b6ecaaa79dfa3275722bc1eca62a378d4beab1). Each retains its upstream source trailer. | Parent pin, integrated build and direct/relay/reboot/failure tests remain. These commits do not establish VPN reliability on the device. |
+| `e14b7ca` SPS and Microlink `5129dc2` reconnect/path changes | Partial, uncommitted working-tree adaptations. | Review, integration and validation remain; neither is treated as shipped. |
+| Server/browser transport, upload allocation fallback, memory/freshness diagnostics, lazy WireGuard and explicit CMake paths | Still outstanding. | Retain the adaptation boundaries and acceptance gates below. |
+
+Recommended next work remains the five areas below: finish bridge validation,
+finish settings integration, adapt video delivery/decoder recovery, complete
+Microlink reliability, and adapt memory/diagnostic improvements. Keep shared
+AAC recording and browser PCM intact. Continue deferring automatic bitrate
+reductions that would lower recordings, broad stack reductions, persistent
+session policy changes, ACME and replacement gamepad implementations.
+
+This follow-up changed only this ledger. Existing source changes, generated
+console bundle, dependency checkouts and unrelated roadmap edits were preserved.
+No new hardware tests, merge, flash or push were performed. Prior implementation
+results above are historical evidence, not tests rerun during this review.
+
+## Video adaptation progress (2026-10-16)
+
+This implementation update follows the reconciliation above; it does not mark
+all five areas complete or establish device performance.
+
+- Console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac)
+  adapts `7b508e1` decoder repair and `48c58b0` advertisement-gated frame ACKs.
+  It additionally rejects late callbacks after stop/decoder replacement, closes
+  rejected decoder configurations, and releases JPEG output completed after stop.
+  Typecheck and production build passed; all 80 console tests passed, including
+  six new video lifecycle/compatibility cases. The server ACK/window protocol
+  and final parent console pin are still outstanding.
+- Firmware [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b)
+  adapts `e14b7ca` SPS no-reorder signaling into both H.264 encoder paths, without
+  adaptive bitrate. Oversized parameter sets and invalid capacities are left
+  unchanged. Exact-output, idempotence, tight-capacity and 10,000 bounded
+  malformed/truncated-input checks passed with address/undefined sanitizers.
+- The working tree now includes `5afe5a5` server keyframe repair and `09e7920`
+  explicit component paths. These remain uncommitted pending their remaining
+  integration checks. Microlink `5129dc2` remains an uncommitted adaptation too.
+- An audio-enabled firmware build of these combined changes passed. Microlink
+  emitted unused-symbol warnings at sites confirmed present in baseline
+  `d6865e1`; no new warning sites were observed. This is build evidence, not
+  direct/relay VPN, browser latency, HDMI reconnect or AAC/MP4 runtime evidence.
+- No device flash or push was performed in this implementation step. Shared
+  encoder output changed, so the existing SD recording result must be repeated
+  on the new image before claiming recording compatibility.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
