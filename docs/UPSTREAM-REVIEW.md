@@ -175,7 +175,10 @@ Enabled and disabled builds passed, with only existing Microlink dependency
 warnings. All 11 observation/recording helper tests passed. The restored build
 uses the original 8192-byte buffer and disables task sampling; the normal image
 contains existing delivery counters but excludes the sampler's log strings.
-Longer combined tests with sustained audible moving content remain pending.
+After app-only restoration, a 15.002 s smoke observation delivered 14.950 s
+of PCM with zero capture overruns and no sampler log entries; source activity
+remained zero. The browser video was resumed. Longer combined tests with
+sustained audible moving content remain pending.
 
 ## Isolated audio workload comparison (2026-10-17)
 
