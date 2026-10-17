@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Fixed
 
+- Build Ethernet-only profiles when Wi-Fi credential defaults are omitted by
+  Kconfig, while keeping unavailable settings visible in the console schema.
+
 - Avoid requesting another H.264 recovery keyframe when the current frame is
   already a keyframe. Video diagnostics now fail on an early socket close.
 

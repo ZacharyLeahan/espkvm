@@ -18,6 +18,15 @@
 #define KVM_SECURITY_DEFAULT 0
 #endif
 
+/* Keep unavailable Wi-Fi settings in the schema on Ethernet-only builds.
+ * Kconfig omits these defaults when the radio feature is disabled. */
+#ifndef CONFIG_KVM_WIFI_DEFAULT_SSID
+#define CONFIG_KVM_WIFI_DEFAULT_SSID ""
+#endif
+#ifndef CONFIG_KVM_WIFI_DEFAULT_PASSWORD
+#define CONFIG_KVM_WIFI_DEFAULT_PASSWORD ""
+#endif
+
 /* Derive an ENUM's .max from its choices array so the two can't drift
  * (the schema iterates choices[0..max]; a short array reads OOB). */
 #define ENUM_MAX(arr) ((int)(sizeof(arr) / sizeof((arr)[0]) - 1))
