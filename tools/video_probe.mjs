@@ -24,6 +24,9 @@ const WebSocket = require("ws");
 
 const host = process.argv[2] ?? "espkvm.local";
 const seconds = Number(process.argv[3] ?? 5);
+if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) {
+  throw new Error("duration must be greater than zero and at most 600 seconds");
+}
 const dumpPath = process.argv[4];
 const caPath = process.argv[5];
 const origin = host.includes("://") ? host : `wss://${host}`;
@@ -33,9 +36,11 @@ endpoint.protocol = endpoint.protocol === "http:" ? "ws:" : endpoint.protocol ==
 const dump = dumpPath ? createWriteStream(dumpPath) : null;
 /* Supply the exported device CA for certificate-verified TLS checks. The
  * legacy no-CA mode remains useful during initial device setup. */
-const ws = new WebSocket(endpoint, caPath
-  ? { ca: readFileSync(caPath), rejectUnauthorized: true }
-  : { rejectUnauthorized: false });
+const ws = new WebSocket(endpoint, {
+  handshakeTimeout: 5000,
+  ...(caPath ? { ca: readFileSync(caPath), rejectUnauthorized: true }
+    : { rejectUnauthorized: false }),
+});
 
 let frames = 0;
 let bytes = 0;

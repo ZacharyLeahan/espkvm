@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:https';
+import { createServer as createHttpServer } from 'node:http';
 import { once } from 'node:events';
 const require = createRequire(new URL('../web/package.json', import.meta.url));
 const { WebSocketServer } = require('ws');
@@ -80,3 +81,21 @@ try {
   }
 } finally { rmSync(temp, { recursive: true, force: true }); }
 console.log('Video probe: pinned CA accepted and unrelated CA rejected');
+
+const stalled = createHttpServer();
+const pending = new Set();
+stalled.on('connection', socket => { pending.add(socket); socket.on('close', () => pending.delete(socket)); });
+stalled.on('upgrade', () => {}); // accepts TCP but never finishes the upgrade
+stalled.listen(0, '127.0.0.1'); await once(stalled, 'listening');
+try {
+  const probe = spawn(process.execPath, [new URL('./video_probe.mjs', import.meta.url).pathname,
+    `http://127.0.0.1:${stalled.address().port}`, '1'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let error = ''; probe.stderr.on('data', chunk => { error += chunk; });
+  const watchdog = setTimeout(() => probe.kill(), 8000);
+  const [code] = await once(probe, 'exit'); clearTimeout(watchdog);
+  assert.equal(code, 1, error); assert.match(error, /timed out/i);
+} finally {
+  for (const socket of pending) socket.destroy();
+  await new Promise(resolve => stalled.close(resolve));
+}
+console.log('Video probe: stalled handshake fails within its connection deadline');

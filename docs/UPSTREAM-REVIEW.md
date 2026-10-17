@@ -61,18 +61,17 @@ inventory decisions farther down retain the original rationale and source URLs.
 | Area | Current implementation | Remaining acceptance work |
 | --- | --- | --- |
 | HDMI bridge recovery | Adapted in [8d94230](https://github.com/ZacharyLeahan/espkvm-xbox/commit/8d942304e8631b0ca37bf34e76d7e7e5fab61979): bounded I2C, failed reads and capped boot recovery, preserving HDMI audio PLL corrections. | Host failure tests/build passed previously; physical reconnects and oversized-to-supported mode changes with SD audio remain unverified. |
-| Settings and build paths | Console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07); firmware [daffe2c](https://github.com/ZacharyLeahan/espkvm-xbox/commit/daffe2c2f4872db3b61aa3be9a4163f4741d0541). Safe drafts, grouping, initial section, card wording and explicit component paths are implemented. | Console tests/typecheck and source-copy build passed previously; integrated browser checks and parent console pin remain. |
+| Settings and build paths | Console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07); firmware [daffe2c](https://github.com/ZacharyLeahan/espkvm-xbox/commit/daffe2c2f4872db3b61aa3be9a4163f4741d0541). Safe drafts, grouping, initial section, card wording and explicit component paths are implemented. | Console tests/typecheck and source-copy build passed previously; first-open selection and grouping were checked in the browser; delayed-save interaction remains. Parent console pin is published. |
 | Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks/build passed previously. HTTPS, slow viewers, simultaneous PCM/SD AAC and TS/MP4 compatibility need combined device validation. No measured latency improvement claimed. |
-| Microlink reliability | Six source-attributed cherry-picks plus reconnect/path adaptation [d3210a0](https://github.com/ZacharyLeahan/microlink/commit/d3210a0523766d6917706aa643750082f61d49f8); exact sources and boundaries are recorded below. | Host checks/build passed previously; direct/relay, peer reboot, clock sync, TLS failures and parent dependency pin remain. |
-| Memory and diagnostics | Upload fallback/lazy WireGuard [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67), freshness [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), heap/task endpoint [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04). | Host checks/build passed previously; measure snapshot pauses, upload behavior and memory under simultaneous video/audio/recording. API skill updated locally; upstream MCP remains an explicitly recorded access gap. |
+| Microlink reliability | Six source-attributed cherry-picks plus reconnect/path adaptation [d3210a0](https://github.com/ZacharyLeahan/microlink/commit/d3210a0523766d6917706aa643750082f61d49f8); exact sources and boundaries are recorded below. | Host checks/build passed previously; direct discovery and tailnet HTTP passed; relay, peer reboot, clock sync and repeated TLS failures remain. Parent dependency pin is published. |
+| Memory and diagnostics | Upload fallback/lazy WireGuard [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67), freshness [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), heap/task endpoint [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04). | Host checks/build passed previously; short snapshot/load and live upload checks passed; worst-case memory behavior remains unverified. API skill is published; upstream MCP remains an explicitly recorded access gap. |
 
-These are local feature-branch implementations, not a completed upstream merge
-or a verified release. Parent pins still reference console `60c39f0` and
-Microlink `d6865e1`; dependency checkouts and the generated console bundle are
-modified. Publication is not established by this reconciliation. An application
-flash started during the earlier implementation work finished successfully
-(hash verified in its existing log); that is installation evidence only, not
-runtime acceptance. This ledger review initiated no additional flash or tests.
+These implementations are published on `upstream-reliability-xbox`, not merged
+into `main` or accepted as a verified release. Parent pins now reference console
+`a258024` and Microlink `d3210a0`; the generated console bundle is committed.
+The matching API skill branch is published at `60949e4`. Later checkpoints below
+record installation and validation evidence, including unsuccessful trials;
+publication alone does not satisfy the remaining acceptance gates.
 
 ### What is still worth adapting
 
@@ -239,6 +238,29 @@ matched exactly between TS and MP4. This is new-image recording/container
 compatibility evidence. It is not an on-device conversion workload test, a
 physical sync measurement, or proof of audible source sound (this source was
 quiet). The local output is `/tmp/espkvm-adapt-remux/card-recording.mp4`.
+
+## Direct-tailnet endurance and CI checkpoint (2026-10-16)
+
+A 60-second WebSocket run through the ESP's Tailscale address completed without
+an early close and negotiated ACKs. It received 12 JPEG frames while the Xbox
+sat at the XBMC library. Capture counters advanced and unchanged-frame skipping
+was about 25 fps. This demonstrates a sustained static-source connection, not
+moving-video frame rate or relay behavior. A subsequent five-second PCM sample
+contained no active audio frames. A bounded controller A press did not visibly
+start the highlighted movie; a read-only control ping later reported the lease
+free. No further blind input was sent. Moving/audible source checks remain open.
+
+The probe now bounds the opening handshake to five seconds and validates its
+requested duration (greater than zero, at most ten minutes). A localhost server
+that accepts TCP but stalls the WebSocket upgrade correctly fails the test;
+ACK, early-close and trusted/untrusted certificate fixtures also pass.
+
+GitHub Actions is enabled. On pushed commit `03b98d4`, the console, host checks
+and layout jobs passed. The firmware matrix was still running at this checkpoint,
+including an active Function EV build step; no firmware-matrix success is claimed.
+Run: https://github.com/ZacharyLeahan/espkvm-xbox/actions/runs/39000357167.
+The new diagnostic timeout change is locally tested and will receive its own
+published revision; this CI run does not cover that later change.
 
 ## Video adaptation progress (2026-10-16)
 
