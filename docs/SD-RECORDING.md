@@ -33,6 +33,16 @@ capture/queue diagnostics, not proof of perceptual synchronization or sound qual
 Keep private firmware backups and credentials out of published evidence. Do not
 format the card for a test.
 
+## H.264 cache correction (2026-10-17)
+
+The reliability branch now flushes CPU-edited SPS/keyframe data before the
+hardware encoder reuses that output buffer. This removes a cache-coherency
+hazard that could corrupt later frames without increasing recorder drop counts.
+It is a plausible cause of the earlier video error, not a deterministic diagnosis.
+See the [cache correction and repeated hardware results](UPSTREAM-REVIEW.md#h264-output-cache-correction-2026-10-17).
+Recorder drop counters measure queue/reference loss; strict decoding of the
+saved file remains necessary to check bitstream integrity.
+
 ## Reliability-branch movie check (2026-10-17)
 
 On the combined upstream-adaptation image, two 30-second movie recordings

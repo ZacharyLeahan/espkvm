@@ -316,6 +316,57 @@ ACKs and remained connected. This does not establish H.264 browser performance.
 Perceptual A/V synchronization, physical delay, authenticated HTTPS media,
 physical HDMI recovery and longer combined-load endurance remain open.
 
+## H.264 output-cache correction (2026-10-17)
+
+Implementation: [ac90156](https://github.com/ZacharyLeahan/espkvm-xbox/commit/ac901569fdcdc8607f5ccd26d5853604a885f724).
+This is a fork integration correction to the SPS adaptation, not a new upstream
+feature. The CPU SPS insertion moves the rest of an IDR in place. The installed
+Espressif encoder writes back only its small slice header before the next DMA,
+then invalidates the output after encoding. Dirty cache lines left by our
+insertion can therefore overwrite later DMA output during eviction. Both the
+asynchronous/PPA and direct-input paths now write back the owned output slot
+after SPS editing; failure suppresses publication and requests a recovery IDR.
+This follows Espressif's [P4 memory-synchronization contract](https://docs.espressif.com/projects/esp-idf/en/latest/esp32p4/api-reference/system/mm_sync.html).
+
+The previously failed TS still reproduces its H.264 macroblock decoding error
+offline. Its TS packet alignment/sync bytes are intact and its AAC independently
+decodes. A new 60-second baseline recording passed before this correction, so
+there is no deterministic failing before/after pair. The cache hazard is real;
+attribution of the particular recorded error remains a hypothesis.
+
+Local SPS/flat-frame host tests passed. The Xbox profile, public Ethernet profile
+and a clean public revision-3 profile (`CONFIG_ESP_REV_MIN_FULL=300`) built.
+Only the previously recorded Microlink unused-symbol warnings appeared in the
+clean build. Application-only flashing succeeded; C6 firmware and credentials
+were unchanged. Installed application SHA-256:
+`24e9119c899290c7a2a52aaec52b88c31dc2f2e2a46c0b3a7c03d6c956bbcc3d`.
+
+Four consecutive 60-second movie recordings passed strict H.264/AAC decoding
+with active stereo 48 kHz audio and simultaneous network PCM. All reported zero
+video/audio queue drops; reported inserted silence/padding ranged from 48 to
+934 PCM frames. Track starts matched and AAC timestamp gaps were within
+1 microsecond rounding. Each test stopped its own recording and restored settings.
+
+| Trial | Card file | Video frames | Decoded AAC seconds | Network PCM seconds |
+| --- | --- | --- | --- | --- |
+| 1 | `VIDEO/up-000043-2.ts` | 605 | 60.0107 | 59.650 |
+| 2 | `VIDEO/up-000138.ts` | 774 | 60.0533 | 59.595 |
+| 3 | `VIDEO/up-000219.ts` | 795 | 60.0320 | 59.575 |
+| 4 | `VIDEO/up-000301.ts` | 769 | 59.9680 | 59.590 |
+
+During trial 2, a 30-second H.264 WebSocket probe also remained connected,
+negotiated ACKs and delivered 170 frames (5.7 fps), including 24 keyframes.
+This adds a combined-load check, not a controlled throughput improvement claim.
+Local evidence directories are `/tmp/espkvm-cache-fixed-01` through `-04`;
+raw media stays local. The bounded samples do not prove indefinite reliability,
+perceptual A/V sync or authenticated HTTPS behavior. The earlier failure remains
+retained as evidence; passing repeats alone cannot establish its exact cause.
+
+CI [39030410499](https://github.com/ZacharyLeahan/espkvm-xbox/actions/runs/39030410499)
+on `ac90156` had three successful host/console/layout jobs and no failures at
+this checkpoint; the firmware matrix was still running. Local builds cover both
+encode paths, but full CI completion is not claimed.
+
 ## Video adaptation progress (2026-10-16)
 
 This implementation update follows the reconciliation above; it does not mark
