@@ -48,12 +48,12 @@ submodule just to update this ledger; those are separate implementation steps.
 - This reconciliation fetched history and inspected source/dependency diffs. New **Pending** recommendations are not approval to integrate. No firmware, console bundle, dependency pin, device setting or installed image was changed; no new hardware/performance validation is claimed.
 - The inventory tip marks what we listed, not what we adopted or fully reviewed.
 
-## Current reconciliation (2026-10-16)
+## Current implementation and acceptance status (2026-10-17)
 
-Fetched firmware `upstream/main`, console `upstream/main` and Microlink
+The last upstream fetch (2026-10-16) checked firmware `upstream/main`, console `upstream/main` and Microlink
 `upstream/idf6` again. Their tips remain `4c62662`, `48c58b0` and `5129dc2`
 respectively: **no new upstream commits since the inventory checkpoint**.
-Reviewed local firmware through `958fa09`, console through `a258024` and
+Implementation and test evidence now cover firmware through `5ff34b2`, console through `a258024` and
 Microlink through `d3210a0`. The checkpoint above describes the original
 baseline; the table below is the current implementation status. Historical
 inventory decisions farther down retain the original rationale and source URLs.
@@ -62,16 +62,31 @@ inventory decisions farther down retain the original rationale and source URLs.
 | --- | --- | --- |
 | HDMI bridge recovery | Adapted in [8d94230](https://github.com/ZacharyLeahan/espkvm-xbox/commit/8d942304e8631b0ca37bf34e76d7e7e5fab61979): bounded I2C, failed reads and capped boot recovery, preserving HDMI audio PLL corrections. | Host failure tests/build passed previously; physical reconnects and oversized-to-supported mode changes with SD audio remain unverified. |
 | Settings and build paths | Console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07); firmware [daffe2c](https://github.com/ZacharyLeahan/espkvm-xbox/commit/daffe2c2f4872db3b61aa3be9a4163f4741d0541). Safe drafts, grouping, initial section, card wording and explicit component paths are implemented. | Console tests/typecheck and source-copy build passed previously; first-open selection and grouping were checked in the browser; delayed-save interaction remains. Parent console pin is published. |
-| Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks/build passed previously. HTTPS, slow viewers, simultaneous PCM/SD AAC and TS/MP4 compatibility need combined device validation. No measured latency improvement claimed. |
+| Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks and both encode-path builds passed. Four post-cache-fix one-minute H.264/AAC recordings decoded with active network PCM; one also carried live video. Video-only recording and host AAC-preserving MP4 conversion passed. Authenticated HTTPS/WebCodecs, slow-viewer recovery, longer endurance and physical A/V delay remain. The earlier intermittent corruption is not deterministically attributed; see the cache correction below. |
 | Microlink reliability | Six source-attributed cherry-picks plus reconnect/path adaptation [d3210a0](https://github.com/ZacharyLeahan/microlink/commit/d3210a0523766d6917706aa643750082f61d49f8); exact sources and boundaries are recorded below. | Host checks/build passed previously; direct discovery and tailnet HTTP passed; relay, peer reboot, clock sync and repeated TLS failures remain. Parent dependency pin is published. |
 | Memory and diagnostics | Upload fallback/lazy WireGuard [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67), freshness [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), heap/task endpoint [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04). | Host checks/build passed previously; short snapshot/load and live upload checks passed; worst-case memory behavior remains unverified. API skill is published; upstream MCP remains an explicitly recorded access gap. |
 
-These implementations are published on `upstream-reliability-xbox`, not merged
-into `main` or accepted as a verified release. Parent pins now reference console
-`a258024` and Microlink `d3210a0`; the generated console bundle is committed.
-The matching API skill branch is published at `60949e4`. Later checkpoints below
-record installation and validation evidence, including unsuccessful trials;
-publication alone does not satisfy the remaining acceptance gates.
+**All five areas are implemented.** Their integration is tracked in
+[PR #3](https://github.com/ZacharyLeahan/espkvm-xbox/pull/3); the user approved
+merging on 2026-10-17. This is implementation acceptance, not a claim that every
+hardware scenario is verified. Parent pins reference console `a258024` and
+Microlink `d3210a0`; the generated bundle is committed, and the API skill branch
+is published at `60949e4`. The full matrix for the final cache correction was
+still running at this update; local Xbox, Ethernet and revision-3 builds passed.
+
+### Next tests that close acceptance gaps
+
+| Priority | Test | Evidence needed | Participation |
+| --- | --- | --- | --- |
+| 1 | Longer combined recording/streaming run, repeated starts/stops and reconnects | Strict H.264/AAC decode of every saved clip; audio activity, continuity, frame delivery and stable heap/task margins; retain any failures. | Agent can run while a continuous source plays. |
+| 2 | Authenticated HTTPS video/audio, logout and slow viewer | Trusted TLS, WebCodecs recovery, bounded audio queues and prompt session revocation without disrupting the SD recorder. | User signs in locally; do not send passwords in chat. |
+| 3 | HDMI unplug/replug and supported/unsupported mode transitions | Recovery of video and I2S clocks without reboot; valid subsequent recordings and input/LCD operation. | User handles cables/source modes while agent observes. |
+| 4 | Tailscale direct/relay and reboot recovery | Confirm actual selected path, reconnect after peer/device reboot, repeated failures without heap loss. | A remote peer/network is needed to establish relay behavior. |
+| 5 | Delayed settings save and memory pressure | Edits made during a delayed save survive; upload fallback succeeds with constrained allocation; no increasing memory loss under repeated load. | Agent can test controlled delays/fault injection; do not claim host tests prove worst-case hardware behavior. |
+
+These tests validate the selected upstream adaptations already in our fork.
+They do not require importing every upstream commit or eliminating GitHub's
+behind count. A fresh upstream inventory is a separate read-only reconciliation.
 
 ### What is still worth adapting
 
