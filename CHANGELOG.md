@@ -14,6 +14,9 @@ bumps the patch).
 
 ### Fixed
 
+- Complete short plain-HTTP writes before advancing WebSocket framing, and
+  close connections when a payload cannot finish within its send budget.
+
 - Flush CPU-edited H.264 SPS/frame data before the output buffer is reused by
   encoder DMA, preventing dirty cache lines from overwriting later frames.
 

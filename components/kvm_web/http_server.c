@@ -2753,6 +2753,40 @@ static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_
     return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
 }
 
+/* IDF's WebSocket sender accepts any nonnegative send result as a full
+ * header/payload write. Plain HTTP needs the same complete-write guarantee
+ * as TLS, or the next frame can start inside an unfinished payload. */
+static int locked_http_send(httpd_handle_t hd, int sockfd, const char *buf, size_t buf_len, int flags)
+{
+    (void)hd;
+    const int slot = tx_lock(sockfd);
+    if (slot < 0) return HTTPD_SOCK_ERR_FAIL;
+    struct timeval timeout = {0};
+    socklen_t timeout_len = sizeof(timeout);
+    int64_t budget = 5000000;
+    if (getsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, &timeout_len) == 0) {
+        const int64_t configured = (int64_t)timeout.tv_sec * 1000000 + timeout.tv_usec;
+        if (configured > 0 && configured < budget) budget = configured;
+    }
+    const int64_t deadline = esp_timer_get_time() + budget;
+    size_t done = 0;
+    while (done < buf_len && esp_timer_get_time() < deadline) {
+        const ssize_t ret = send(sockfd, buf + done, buf_len - done, flags);
+        if (ret > 0 && (size_t)ret <= buf_len - done) {
+            done += (size_t)ret;
+        } else if (ret < 0 && errno == EINTR) {
+            vTaskDelay(1);
+        } else {
+            /* EAGAIN/EWOULDBLOCK is the blocking socket's send timeout.
+             * Do not renew that timeout by retrying the same stalled write. */
+            break;
+        }
+    }
+    if (done != buf_len) shutdown(sockfd, SHUT_RDWR);
+    tx_unlock(slot);
+    return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
+}
+
 static esp_err_t ws_send_frame(httpd_handle_t server, int fd, httpd_ws_frame_t *frame)
 {
     if (!server || fd < 0 || !s_tx_mu) return ESP_FAIL;
@@ -2940,11 +2974,10 @@ static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
     if (!s_tx_mu || sockfd < 0 || xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) != pdTRUE) {
         return ESP_OK;
     }
-    /* On the TLS server every write to this session - ours and the server's
-     * own - now takes the session write lock. See locked_ssl_send. */
-    if (httpd_sess_get_transport_ctx(hd, sockfd)) {
-        (void)httpd_sess_set_send_override(hd, sockfd, locked_ssl_send);
-    }
+    /* Both transports must complete writes and serialize them with our
+     * frame senders. Leave TLS on its existing transport-specific path. */
+    (void)httpd_sess_set_send_override(hd, sockfd,
+        httpd_sess_get_transport_ctx(hd, sockfd) ? locked_ssl_send : locked_http_send);
     bool listed = false;
     for (int i = 0; i < TX_MAX_SOCKETS; i++) {
         if (s_tx_fds[i] == sockfd) {
