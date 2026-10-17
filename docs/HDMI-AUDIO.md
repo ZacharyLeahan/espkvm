@@ -175,7 +175,10 @@ Mbit/s before HTTP/TCP/TLS overhead). Browser playback stays PCM. MicroSD record
 buffers hold about 40 ms total; the worker reads roughly 5 ms at a time. At 48 kHz, each 960-byte PCM block
 fits one TCP packet. CPU-side working buffers live in PSRAM. A
 separate asynchronous HTTP task keeps audio reads out of the HTTP server loop.
-TCP_NODELAY avoids Nagle delay; sends have a 100 ms socket timeout. A DMA
+TCP_NODELAY avoids Nagle delay; sends have a 250 ms socket timeout. Plain HTTP
+uses nonblocking attempts with a yield between retries to avoid lwIP blocking
+write timeout overshoot. This is a stall budget, not a fixed playback buffer;
+scheduling and lock contention can still extend elapsed time. A DMA
 overrun discards the affected block and resets capture to fresh samples. Network backpressure drops stale browser-queue blocks or closes that connection; it does not reset the recorder.
 The browser independently discards stale bursts. P4 SDIO transfer buffers honor
 the configured PSRAM preference with cache-aligned allocations and an internal
@@ -268,3 +271,28 @@ Neither count proves Wi-Fi loss or isolates a specific scheduler bottleneck.
 The observer stops before its sender context is released. Allocation failure
 logs unavailability and leaves PCM streaming usable. Disable sampling again
 for normal playback and latency measurements.
+
+### Optional TCP stall diagnostics
+
+`CONFIG_KVM_HTTP_TX_DIAGNOSTICS` defaults off. When enabled, plain HTTP PCM
+writes taking at least 50 ms log retry timing and TCP queue/ACK snapshots.
+The sampler supports IPv4 and IPv4-mapped sockets, uses lwIP private PCB
+definitions under its core lock, and can perturb timing. `found=0` means no
+valid TCP snapshot; do not interpret its zero fields as an empty queue.
+Poll device logs during a bounded observation; the ring cannot retain a long
+run. Disable the option again for normal playback. See the upstream review
+ledger for measured stalls and remaining network-path uncertainty.
+
+With Wi-Fi enabled, the diagnostic logs `esp_wifi_get_ps()` at stream start;
+mode 0 with `ESP_OK` confirms the radio reports power saving off. Enable
+`CONFIG_ESP_HOSTED_HOST_PKT_STATS` alongside it to include approximate C6-to-P4
+receive and stack-callback counters at first stall, after 100 ms of retries,
+and at completion. RX-out counts callback attempts, not confirmed acceptance.
+
+The diagnostic linker wrapper observes Ethernet/IPv4 TCP ACKs for the selected
+port-80 audio tuple at `esp_netif_receive`, validates IP/TCP checksums, and then
+passes the original buffer and arguments through unchanged. It does not cover
+VLAN, native IPv6, fragmented IP or HTTPS. `ingress count=0` means no matching
+ACK has been observed since tuple selection; its ACK/age fields are not evidence.
+Snapshots are approximate across tasks, and the first probe selects the tuple
+only when a send first stalls. Disable both diagnostic options after testing.

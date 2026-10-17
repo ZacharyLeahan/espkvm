@@ -47,6 +47,14 @@
 #include "esp_netif.h"
 
 #include "lwip/sockets.h"
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+#include <stdatomic.h>
+#include "lwip/priv/tcp_priv.h"
+#include "lwip/tcpip.h"
+#if CONFIG_KVM_WIFI && CONFIG_ESP_HOSTED_HOST_PKT_STATS
+#include "eh_host_pkt_stats.h"
+#endif
+#endif
 
 #include "cJSON.h"
 
@@ -2725,7 +2733,7 @@ static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_
         tx_unlock(slot);
         return HTTPD_SOCK_ERR_FAIL;
     }
-    /* Respect the PCM listener's 100 ms timeout. Other sessions retain their
+    /* Respect the PCM listener's 250 ms timeout. Other sessions retain their
      * own send timeout, capped at five seconds. Never spin on WANT_WRITE. */
     struct timeval timeout = {0};
     socklen_t timeout_len = sizeof(timeout);
@@ -2749,6 +2757,221 @@ static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_
     /* HTTPD's WebSocket sender does not repair a short payload write. Return
      * only a complete write or an error, and make a partial stream unusable. */
     if (done != buf_len) shutdown(sockfd, SHUT_RDWR);
+    tx_unlock(slot);
+    return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
+}
+
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+/* Observe only the selected IPv4 audio tuple, before esp-netif takes buffer
+ * ownership. Atomics avoid taking the lwIP lock in the receive callback. */
+static atomic_uint probe_peer_port, probe_peer_addr, probe_local_addr;
+static atomic_uint probe_rx_count, probe_rx_ack, probe_rx_tick, probe_rx_bad;
+static uint16_t probe_be16(const uint8_t *p) { return ((uint16_t)p[0] << 8) | p[1]; }
+static uint32_t probe_be32(const uint8_t *p) { return ((uint32_t)probe_be16(p) << 16) | probe_be16(p + 2); }
+static uint32_t probe_sum(const uint8_t *p, size_t n)
+{
+    uint32_t sum = 0;
+    while (n >= 2) { sum += probe_be16(p); p += 2; n -= 2; }
+    if (n) sum += (uint32_t)p[0] << 8;
+    return sum;
+}
+static bool probe_sum_ok(uint32_t sum)
+{
+    while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+    return sum == 0xffff;
+}
+static void probe_rx_frame(const uint8_t *frame, size_t len)
+{
+    if (!frame || len < 54 || probe_be16(frame + 12) != 0x0800) return;
+    const uint8_t *ip = frame + 14;
+    size_t ihl = (ip[0] & 15) * 4, total = probe_be16(ip + 2);
+    if ((ip[0] >> 4) != 4 || ihl < 20 || total < ihl + 20 || total > len - 14 ||
+        ip[9] != 6 || (probe_be16(ip + 6) & 0x3fff)) return;
+    const uint8_t *tcp = ip + ihl;
+    uint32_t src, dst;
+    memcpy(&src, ip + 12, sizeof(src)); memcpy(&dst, ip + 16, sizeof(dst));
+    if (src != atomic_load(&probe_peer_addr) || dst != atomic_load(&probe_local_addr) ||
+        probe_be16(tcp) != atomic_load(&probe_peer_port) || probe_be16(tcp + 2) != 80 || !(tcp[13] & 0x10)) return;
+    const size_t tcp_len = total - ihl;
+    if (!probe_sum_ok(probe_sum(ip, ihl)) ||
+        !probe_sum_ok(probe_sum(ip + 12, 8) + 6 + tcp_len + probe_sum(tcp, tcp_len))) {
+        atomic_fetch_add(&probe_rx_bad, 1);
+        return;
+    }
+    atomic_store(&probe_rx_ack, probe_be32(tcp + 8));
+    atomic_store(&probe_rx_tick, (uint32_t)(esp_timer_get_time() / 1000));
+    atomic_fetch_add(&probe_rx_count, 1);
+}
+esp_err_t __real_esp_netif_receive(esp_netif_t *netif, void *buffer, size_t len, void *eb);
+esp_err_t __wrap_esp_netif_receive(esp_netif_t *netif, void *buffer, size_t len, void *eb)
+{
+    probe_rx_frame(buffer, len);
+    return __real_esp_netif_receive(netif, buffer, len, eb);
+}
+
+typedef struct {
+    uint32_t free_bytes, window, ack, next, queued_bytes, cwnd;
+    unsigned queue, unacked, unsent, retransmits, found;
+    int64_t lock_us;
+    uint32_t rx_ack_count, rx_ack, rx_age_ms, rx_bad;
+#if CONFIG_KVM_WIFI && CONFIG_ESP_HOSTED_HOST_PKT_STATS
+    uint32_t rx_in, rx_out, tx_in, tx_out, tx_drop, credit_stalls;
+#endif
+} tx_probe_t;
+
+static tx_probe_t tx_probe(int fd)
+{
+    tx_probe_t out = {0};
+#if CONFIG_KVM_WIFI && CONFIG_ESP_HOSTED_HOST_PKT_STATS
+    /* Approximate cross-task counters, not an atomic packet trace. RX out
+     * counts callback attempts, not proof the stack accepted each packet. */
+    out.rx_in = pkt_stats.sta_rx_in; out.rx_out = pkt_stats.sta_rx_out;
+    out.tx_in = pkt_stats.sta_tx_in_pass; out.tx_out = pkt_stats.sta_tx_out;
+    out.tx_drop = pkt_stats.sta_tx_out_drop; out.credit_stalls = pkt_stats.tx_credit_stalls;
+#endif
+    struct sockaddr_storage local = {0}, peer = {0};
+    socklen_t len = sizeof(local);
+    if (getsockname(fd, (struct sockaddr *)&local, &len)) return out;
+    len = sizeof(peer);
+    if (getpeername(fd, (struct sockaddr *)&peer, &len)) return out;
+    uint16_t local_port, peer_port;
+    uint32_t local_addr, peer_addr;
+    if (local.ss_family == AF_INET && peer.ss_family == AF_INET) {
+        const struct sockaddr_in *l = (const struct sockaddr_in *)&local;
+        const struct sockaddr_in *r = (const struct sockaddr_in *)&peer;
+        local_port = ntohs(l->sin_port); peer_port = ntohs(r->sin_port);
+        local_addr = l->sin_addr.s_addr; peer_addr = r->sin_addr.s_addr;
+    } else if (local.ss_family == AF_INET6 && peer.ss_family == AF_INET6) {
+        const struct sockaddr_in6 *l = (const struct sockaddr_in6 *)&local;
+        const struct sockaddr_in6 *r = (const struct sockaddr_in6 *)&peer;
+        if (!IN6_IS_ADDR_V4MAPPED(&l->sin6_addr) || !IN6_IS_ADDR_V4MAPPED(&r->sin6_addr)) return out;
+        local_port = ntohs(l->sin6_port); peer_port = ntohs(r->sin6_port);
+        memcpy(&local_addr, &l->sin6_addr.s6_addr[12], sizeof(local_addr));
+        memcpy(&peer_addr, &r->sin6_addr.s6_addr[12], sizeof(peer_addr));
+    } else return out;
+    if (atomic_load(&probe_peer_port) != peer_port || atomic_load(&probe_peer_addr) != peer_addr) {
+        atomic_store(&probe_peer_port, 0);
+        atomic_store(&probe_peer_addr, peer_addr); atomic_store(&probe_local_addr, local_addr);
+        atomic_store(&probe_rx_count, 0); atomic_store(&probe_rx_ack, 0);
+        atomic_store(&probe_rx_tick, 0); atomic_store(&probe_rx_bad, 0);
+        atomic_store(&probe_peer_port, peer_port);
+    }
+    out.rx_ack_count = atomic_load(&probe_rx_count); out.rx_ack = atomic_load(&probe_rx_ack);
+    out.rx_age_ms = (uint32_t)(esp_timer_get_time() / 1000) - atomic_load(&probe_rx_tick);
+    out.rx_bad = atomic_load(&probe_rx_bad);
+    const int64_t start = esp_timer_get_time();
+    LOCK_TCPIP_CORE();
+    out.lock_us = esp_timer_get_time() - start;
+    /* Walk under the core lock instead of retaining a socket's private PCB
+     * pointer across asynchronous close/reuse. Match the full IPv4 tuple. */
+    for (struct tcp_pcb *pcb = tcp_active_pcbs; pcb; pcb = pcb->next) {
+        if (!IP_IS_V4(&pcb->local_ip) || !IP_IS_V4(&pcb->remote_ip) ||
+            pcb->local_port != local_port || pcb->remote_port != peer_port ||
+            ip4_addr_get_u32(ip_2_ip4(&pcb->local_ip)) != local_addr ||
+            ip4_addr_get_u32(ip_2_ip4(&pcb->remote_ip)) != peer_addr) continue;
+        out.found = 1; out.free_bytes = pcb->snd_buf; out.queue = pcb->snd_queuelen;
+        out.window = pcb->snd_wnd; out.ack = pcb->lastack; out.next = pcb->snd_nxt;
+        out.queued_bytes = pcb->snd_lbb - pcb->lastack; out.cwnd = pcb->cwnd;
+        out.retransmits = pcb->nrtx;
+        for (struct tcp_seg *seg = pcb->unacked; seg; seg = seg->next) out.unacked++;
+        for (struct tcp_seg *seg = pcb->unsent; seg; seg = seg->next) out.unsent++;
+        break;
+    }
+    UNLOCK_TCPIP_CORE();
+    return out;
+}
+
+static void tx_probe_log(const char *phase, int fd, const tx_probe_t *p)
+{
+    ESP_LOGI("tx_probe", "%s ingress count=%"PRIu32" ack=%"PRIu32" age_ms=%"PRIu32" bad=%"PRIu32,
+             phase, p->rx_ack_count, p->rx_ack, p->rx_age_ms, p->rx_bad);
+    ESP_LOGI("tx_probe", "%s fd=%d found=%u free=%"PRIu32" q=%u ua=%u us=%u win=%"PRIu32,
+             phase, fd, p->found, p->free_bytes, p->queue, p->unacked, p->unsent, p->window);
+    ESP_LOGI("tx_probe", "%s ack=%"PRIu32" next=%"PRIu32" queued=%"PRIu32" cwnd=%"PRIu32" rtx=%u lock_us=%"PRId64,
+             phase, p->ack, p->next, p->queued_bytes, p->cwnd, p->retransmits, p->lock_us);
+#if CONFIG_KVM_WIFI && CONFIG_ESP_HOSTED_HOST_PKT_STATS
+    ESP_LOGI("tx_probe", "%s rx_in=%"PRIu32" rx_out=%"PRIu32" tx_in=%"PRIu32" tx_out=%"PRIu32" drop=%"PRIu32" credit=%"PRIu32,
+             phase, p->rx_in, p->rx_out, p->tx_in, p->tx_out, p->tx_drop, p->credit_stalls);
+#endif
+}
+#endif
+
+/* IDF's WebSocket sender accepts any nonnegative send result as a full
+ * header/payload write. Plain HTTP needs the same complete-write guarantee
+ * as TLS, or the next frame can start inside an unfinished payload. */
+static int locked_http_send(httpd_handle_t hd, int sockfd, const char *buf, size_t buf_len, int flags)
+{
+    (void)hd;
+    const int slot = tx_lock(sockfd);
+    if (slot < 0) return HTTPD_SOCK_ERR_FAIL;
+    /* Blocking lwIP writes recheck SO_SNDTIMEO only on ACK/poll callbacks;
+     * the netconn poll can be a second apart. Nonblocking attempts let this
+     * task enforce the configured deadline without waiting for that poll. */
+    struct timeval timeout = {0};
+    socklen_t timeout_len = sizeof(timeout);
+    int64_t budget = 5000000;
+    if (getsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, &timeout_len) == 0) {
+        const int64_t configured = (int64_t)timeout.tv_sec * 1000000 + timeout.tv_usec;
+        if (configured > 0 && configured < budget) budget = configured;
+    }
+    const int64_t deadline = esp_timer_get_time() + budget;
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+    const bool probe_on = budget == 250000;
+    const int64_t probe_start = esp_timer_get_time();
+    int64_t max_call = 0, max_yield = 0;
+    unsigned retries = 0;
+    tx_probe_t first = {0}, middle = {0};
+    bool sampled_middle = false;
+#endif
+    size_t done = 0;
+    int failure_errno = 0;
+    while (done < buf_len && esp_timer_get_time() < deadline) {
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+        const int64_t call_start = esp_timer_get_time();
+#endif
+        const ssize_t ret = send(sockfd, buf + done, buf_len - done, flags | MSG_DONTWAIT);
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+        const int64_t call_us = esp_timer_get_time() - call_start;
+        if (call_us > max_call) max_call = call_us;
+#endif
+        if (ret > 0 && (size_t)ret <= buf_len - done) {
+            done += (size_t)ret;
+        } else if (ret < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+            if (probe_on && retries++ == 0) first = tx_probe(sockfd);
+            if (probe_on && !sampled_middle && esp_timer_get_time() - probe_start >= 100000) {
+                middle = tx_probe(sockfd);
+                sampled_middle = true;
+            }
+            const int64_t yield_start = esp_timer_get_time();
+#endif
+            vTaskDelay(1);
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+            const int64_t yield_us = esp_timer_get_time() - yield_start;
+            if (yield_us > max_yield) max_yield = yield_us;
+#endif
+        } else {
+            failure_errno = ret < 0 ? errno : 0;
+            break;
+        }
+    }
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+    const int64_t elapsed = esp_timer_get_time() - probe_start;
+    if (probe_on && elapsed >= 50000) {
+        const tx_probe_t last = tx_probe(sockfd);
+        ESP_LOGI("tx_probe", "fd=%d bytes=%u/%u us=%"PRId64" retry=%u call=%"PRId64" yield=%"PRId64,
+                 sockfd, (unsigned)done, (unsigned)buf_len, elapsed, retries, max_call, max_yield);
+        tx_probe_log("first", sockfd, &first);
+        if (sampled_middle) tx_probe_log("middle", sockfd, &middle);
+        tx_probe_log("last", sockfd, &last);
+    }
+#endif
+    if (done != buf_len) {
+        if (esp_timer_get_time() >= deadline) failure_errno = ETIMEDOUT;
+        shutdown(sockfd, SHUT_RDWR);
+        ESP_LOGW("http_tx", "incomplete write bytes=%u/%u errno=%d",
+                 (unsigned)done, (unsigned)buf_len, failure_errno);
+    }
     tx_unlock(slot);
     return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
 }
@@ -2940,11 +3163,10 @@ static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
     if (!s_tx_mu || sockfd < 0 || xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) != pdTRUE) {
         return ESP_OK;
     }
-    /* On the TLS server every write to this session - ours and the server's
-     * own - now takes the session write lock. See locked_ssl_send. */
-    if (httpd_sess_get_transport_ctx(hd, sockfd)) {
-        (void)httpd_sess_set_send_override(hd, sockfd, locked_ssl_send);
-    }
+    /* Both transports must complete writes and serialize them with our
+     * frame senders. Leave TLS on its existing transport-specific path. */
+    (void)httpd_sess_set_send_override(hd, sockfd,
+        httpd_sess_get_transport_ctx(hd, sockfd) ? locked_ssl_send : locked_http_send);
     bool listed = false;
     for (int i = 0; i < TX_MAX_SOCKETS; i++) {
         if (s_tx_fds[i] == sockfd) {

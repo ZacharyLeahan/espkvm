@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Exercise the production session locking and TLS write loop with host mocks."""
+"""Exercise the production session locking and HTTP/TLS write loops with host mocks."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -7,8 +7,10 @@ s = (Path(__file__).resolve().parents[1] / 'http_server.c').read_text()
 a = s.index('static int tx_lock('); b = s.index('/* The control WebSockets', a)
 c = s.index('static int locked_ssl_send('); d = s.index('static esp_err_t ws_send_frame', c)
 harness = r'''
+#define _DARWIN_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,6 +19,7 @@ harness = r'''
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#define ESP_LOGW(tag, ...) ((void)(tag), (void)printf(__VA_ARGS__))
 #define TX_MAX_SOCKETS 16
 #define portMAX_DELAY -1
 #define HTTPD_SOCK_ERR_FAIL -1
@@ -63,11 +66,23 @@ static ssize_t esp_tls_conn_write(void *tls, const char *buf, size_t len) {
     if (r > 0) offset += (size_t)r;
     return r;
 }
+static int send_errno;
+static int64_t send_elapsed;
+static ssize_t mock_send(int fd, const char *buf, size_t len, int flags) {
+    assert(fd == 10 && flags == MSG_DONTWAIT && buf == expected + offset && len == 6 - offset);
+    writes++; now += send_elapsed;
+    ssize_t r = next < count ? results[next++] : -1;
+    if (r > 0) offset += (size_t)r;
+    errno = send_errno;
+    return r;
+}
+#define send mock_send
 #define getsockopt mock_getsockopt
 #define shutdown mock_shutdown
 '''+s[a:b]+s[c:d]+r'''
 static void reset(void) {
     now = writes = yields = shut = context_reads = count = next = offset = 0;
+    send_errno = EAGAIN; send_elapsed = 0;
     timeout_us = 100000; expected = "abcdef"; ctx.tls = (void *)1;
 }
 static void *other_session(void *arg) {
@@ -103,6 +118,27 @@ int main(void) {
     assert(locked_ssl_send(NULL,10,expected,6,0) == -1 && writes == 0);
     reset(); s_tx_fds[0] = -1;
     assert(locked_ssl_send(NULL,10,expected,6,0) == -1 && context_reads == 0);
+    s_tx_fds[0] = 10;
+    reset(); results[0] = 2; results[1] = 4; count = 2;
+    assert(locked_http_send(NULL,10,expected,6,0) == 6);
+    assert(writes == 2 && offset == 6 && shut == 0);
+    reset(); results[0] = 2; count = 1;
+    assert(locked_http_send(NULL,10,expected,6,0) == -1);
+    assert(writes == 11 && offset == 2 && shut == 1 && yields == 10);
+    reset(); results[0] = 0; count = 1;
+    assert(locked_http_send(NULL,10,expected,6,0) == -1 && shut == 1);
+    reset(); send_errno = EINTR; results[0] = -1; results[1] = 6; count = 2;
+    assert(locked_http_send(NULL,10,expected,6,0) == 6 && yields == 1);
+    reset(); send_errno = EPIPE;
+    assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
+    reset(); results[0] = 2; results[1] = -1; results[2] = 4; count = 3;
+    assert(locked_http_send(NULL,10,expected,6,0) == 6 && writes == 3 && yields == 1);
+    reset(); send_elapsed = 100000; results[0] = 2; results[1] = 4; count = 2;
+    assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
+    reset(); send_elapsed = 5000000; results[0] = 2; results[1] = 4; count = 2;
+    assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
+    reset(); s_tx_fds[0] = -1;
+    assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 0);
     s_tx_fds[0] = 10;
     recycle_slot = true;
     assert(tx_lock(10) == -1); /* same descriptor reused after table snapshot */

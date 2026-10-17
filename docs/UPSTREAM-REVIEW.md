@@ -113,6 +113,315 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## C6 receive boundary and radio power state (2026-10-17)
+
+Implementation: [71732e9](https://github.com/ZacharyLeahan/espkvm-xbox/commit/71732e9).
+
+Follow-up diagnostic-only work extends the default-off TCP probe with
+ESP-Hosted host counters, one midpoint snapshot after 100 ms of retries,
+`esp_wifi_get_ps()` at audio-stream start, and a read-only linker wrapper around
+`esp_netif_receive`. The wrapper validates Ethernet/IPv4 TCP checksums and
+observes ACKs only for the selected audio tuple. Original buffer, length, opaque
+handle, ownership and return value pass unchanged to the real function.
+It does not inspect TLS, VLAN frames, native IPv6 or fragmented IP.
+No sender policy, queue, timeout, API/auth contract or C6 firmware was changed.
+
+**Measured findings:**
+
+- All three stream-start readbacks returned `ESP_OK`, mode 0 (`WIFI_PS_NONE`).
+  This confirms the C6 reports modem sleep off at those points; it is not a
+  continuous measurement of radio state.
+- The receive-counter run completed 150.004 seconds, delivering 149.475 seconds
+  of PCM. During a 216.453 ms send, RX-in/RX-out rose together from 10,663 to
+  10,684 by the midpoint while TCP's ACK stayed unchanged. Both then reached
+  10,712 at completion. Counter snapshots showed zero TX drops/credit stalls.
+  RX-in counts parsed station frames; RX-out counts stack-callback attempts,
+  not successful acceptance. These cross-task counters are approximate.
+- The first ACK-ingress run delivered 149.725 seconds over 150.007 seconds,
+  with 255 ms confirmed producer gaps and maximum successful send 110.160 ms.
+  It was quiet PCM (zero active frames), so this validates transport only.
+  All six captured valid ingress/TCP ACK comparisons matched.
+- The repeat delivered 149.140 seconds over 150.006 seconds, with 810 ms
+  confirmed gaps and maximum successful send 249.783 ms. Its one active frame
+  is insufficient evidence of audible content; treat it as effectively quiet.
+  All 15 valid captured ingress/TCP ACK comparisons matched, including midpoint
+  snapshots. In a 127.117 ms send, the matching ingress ACK count stayed at
+  12,116 from first to midpoint, with ACK age growing from 13 to 118 ms. During
+  that same interval RX-in/RX-out both advanced from 59,305 to 59,327. Thus
+  other packets crossed the host receive path while this flow's next valid ACK
+  had not reached the observed boundary. The maximum sampled ACK age was 145 ms.
+  Bad IP/TCP checksum counts remained zero in the captured snapshots.
+- The repeat's receiver-side trace had 29,863 data packets, maximum arrival gap
+  243.199 ms, no repeated/out-of-order sequence ranges, and no kernel capture
+  drops. It again showed prompt local ACK emission; capture timestamps do not
+  prove when the ACK crossed the radio link. Both observers finished their
+  requested durations; timeout logs after client shutdown are not early failures.
+
+**Interpretation:** the sampled stalls do not show TCP holding a newer ACK that
+already reached P4 ingress, nor the entire C6/P4 receive pipeline stopping.
+Evidence instead points before that ingress boundary for the audio ACK flow.
+This narrows the investigation but cannot distinguish AP/radio delivery,
+C6 packet handling or an earlier SDIO stage, and cannot exclude unobserved
+transient backlog. There is no evidence here to justify increasing sender
+buffers, changing deadlines or patching TCP ACK handling.
+
+Startup also logged host ESP-Hosted 3.0.9 versus coprocessor 0.0.0 and a mismatch
+warning. The host initializes that field to zero and fills it only from an
+optional firmware-version TLV. Therefore 0.0.0 is not a verified C6 firmware
+identity or proof that updating it fixes these stalls. C6 flashing was not done.
+A useful next step is to establish the actual C6 build/protocol compatibility
+and compare the same path on another access point before selecting a radio fix.
+
+The enabled build and checksum/parser tests passed. Host tests cover valid ACKs,
+wrong tuples, truncated/malformed lengths, fragments, checksum failures and
+unchanged packet bytes under ASan/UBSan; existing TX/pacing tests also pass.
+The initial diagnostic dependency declaration was corrected before flashing.
+Raw captures remain local: `/tmp/espkvm-rxprobe-01`, `/tmp/espkvm-ackprobe-01`,
+and `/tmp/espkvm-ackprobe-02`. No new microSD or subjective listening acceptance
+is claimed. PR #7 remains draft; the normal configuration keeps both TCP and
+ESP-Hosted packet diagnostics disabled.
+
+## TCP queue and path correlation (2026-10-17)
+
+Instrumentation and evidence: [1d44bd3](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1d44bd3).
+
+The default-off `CONFIG_KVM_HTTP_TX_DIAGNOSTICS` option samples stalled plain
+HTTP PCM sends. It records free TCP send bytes, queued/unacknowledged/unsent
+segments, advertised window, last acknowledged/next sequence, congestion window,
+retransmit state, explicit core-lock acquisition time, retry count, longest
+socket call and scheduler yield. PCB traversal uses the lwIP core lock and the
+full IPv4 tuple, including IPv4-mapped IPv6 socket addresses. Native IPv6 and
+TLS are not covered. It retains no PCB pointer across sampling calls.
+No media, queue, timeout, endpoint or authentication policy changes in this step.
+
+Measured on Function EV / C790, 48 kHz stereo PCM, Wi-Fi, without a video viewer
+or SD recording during these isolated runs:
+
+- The first 150-second diagnostic trial delivered 149.165 seconds. Its initial
+  IPv4-only socket probe returned `found=0` on the dual-stack server, so its TCP
+  state fields are invalid evidence. The sampler was corrected and retested.
+- The corrected 150-second run delivered 149.070 seconds in 150.005 seconds;
+  confirmed producer gaps were 43,920 frames (915 ms), with maximum successful
+  send 170.447 ms. Representative stall snapshots showed **zero free send
+  bytes, 8,192 bytes queued, 9-12 unacknowledged segments, no unsent segments,
+  and a 65,535-byte peer window**. The 169.060 ms write retried 17 times,
+  with maximum socket-call duration 432 us and yield 9.950 ms; explicit core
+  lock acquisition took 2 us. Its next snapshot showed ACK progress and free
+  space, allowing completion. This rules against a single long socket call or
+  gross sender-task starvation in that captured stall, not every possible stall.
+- The corresponding receiver trace showed a 171.914 ms data-arrival gap.
+  The Mac emitted the ACK for the preceding packet after 67 us; the ESP's
+  snapshot still considered its send buffer unacknowledged. Receiver capture
+  timestamps are host-stack timestamps, not proof of over-the-air delivery.
+  Two stall clusters occurred about 60 seconds apart. There were 29,856 data
+  packets, no repeated/out-of-order sequence ranges in this receiver capture,
+  and no kernel capture drops. This does not rule out loss on the reverse path.
+- A further 150-second run added five pings/second to the gateway and ESP.
+  PCM delivered 149.270 seconds in 150.005 seconds, with 33,360 confirmed gap
+  frames (695 ms), maximum successful send 216.032 ms, and maximum packet
+  arrival gap 259.168 ms. Across 736 timed replies per destination, gateway
+  RTT peaked at 28.087 ms while ESP RTT peaked at 270.939 ms during the audio
+  stall cluster. Pings did not eliminate the stalls. This points away from a
+  general Mac-to-router outage and toward the AP-to-ESP/C6/SDIO receive path;
+  it does not identify which part is responsible. Probe traffic can perturb
+  timing, so this is not a controlled performance improvement claim.
+
+Both corrected audio observers completed their requested durations; final send
+failures occurred at client shutdown and are not counted as premature failures.
+No recorder regression test or successful endurance acceptance is claimed for
+these diagnostic runs. Existing TX/pacing host tests passed. Enabled and disabled
+app builds were checked; full rebuilds expose existing unused-variable/function
+warnings in Microlink, with no new diagnostic-code warnings.
+
+Evidence stays local in `/tmp/espkvm-txprobe-01`, `/tmp/espkvm-txprobe-02`, and
+`/tmp/espkvm-txprobe-path`. No raw media or packet summaries are published.
+For reproduction, enable the diagnostic option, run `tools/observe_audio.py`
+for 150 seconds with a new local WAV path, and poll `/api/v1/system/log` every
+2 seconds, retaining only `tx_probe`, `audio_stream` and `http_tx` entries with
+host timestamps. The ring is small; an end-only log fetch misses evidence.
+Correlate sequence numbers with a local device-filtered TCP header capture.
+Use trusted TLS/cookies where configured; do not disable authentication for tests.
+Turn diagnostics off again for normal use.
+
+**Decision:** keep PR #7 draft. Do not increase queue/deadline defaults based on
+this evidence. The next measurement should compare C6/SDIO received-packet and
+stack-delivery counters during a stall, and confirm the radio power-save state.
+ESP-Hosted exposes optional host packet counters, but they were not enabled or
+validated here. Its receive-loop review did not establish a matching periodic
+sleep or a proven code defect. A radio/receive-path fix needs that next boundary
+measurement or an alternate-network comparison before another combined
+video/PCM/microSD acceptance run is meaningful.
+
+## Nonblocking HTTP deadline experiment (2026-10-17)
+
+Implementation and evidence: [456d090](https://github.com/ZacharyLeahan/espkvm-xbox/commit/456d090).
+
+This follow-up supersedes the blocking-write policy in the historical section
+below. The local ESP-IDF lwIP dependency at `c6f2f878e7b0f86033214b85547d579be43351e3`
+checks blocked netconn write timeouts from ACK/poll callbacks
+(`src/api/api_msg.c`, `lwip_netconn_do_writemore`). Its TCP poll interval is two
+500 ms slow ticks. A 100 ms SO_SNDTIMEO therefore does not guarantee a 100 ms
+return when the send queue stalls. This explains a possible timeout overshoot;
+it does not establish the underlying cause of network backpressure.
+
+The fork wrapper now uses MSG_DONTWAIT, retries partial writes and transient
+EINTR/EAGAIN with a one-tick yield, and closes an incomplete stream at its socket
+budget (capped at five seconds). PCM uses 250 ms, preserving the 40 ms browser
+producer queue, TCP_NODELAY and recorder path. TLS retains its existing loop,
+with the changed PCM socket budget. Lock acquisition/scheduling are not hard
+real-time bounded. No REST shape, authentication or media format changed.
+
+- At 100 ms, the 120-second combined test still lost PCM near 87 seconds, but
+  the failed send took 110.360 ms instead of the previous 1.158 seconds.
+  Confirmed live gaps were 420 ms. Video completed 1,111 frames/110 seconds;
+  the 30,331,920-byte microSD file strictly decoded H.264 and stereo 48 kHz AAC,
+  with zero recorder queue drops and 489 inserted silence frames. Overall
+  acceptance failed because network audio ended early.
+- At 250 ms, the 180-second combined check passed. Network audio delivered
+  179.210 seconds in 180.002 seconds, with sound detected. Video completed
+  1,600 frames/170 seconds (9.4 fps, 1,125 kbit/s, 96 keyframes, ACKs enabled).
+  The final timed-out send (259.649 ms) occurred at client shutdown; the client
+  completed its full duration. Maximum successful send was 118.966 ms.
+  Capture overruns and recorder queue drops were zero. The microSD file
+  `VIDEO/up-000031-3.ts` strictly decoded both tracks: 179.968 seconds of AAC,
+  93 silence frames (1.94 ms), SHA-256
+  `b0fb5e21b06921a472be804b6044905e798fd27029b9811efcbe430af626de50`.
+  This establishes short-run connection survival, not gap-free audio or
+  measured physical A/V synchronization.
+
+- The attempted 600-second repeat failed early: PCM sent 1,229,040 frames
+  (25.605 seconds), then timed out with 512/960 bytes written. Confirmed gaps
+  were 17,520 frames (365 ms), maximum successful send 170.995 ms, failed send
+  260.348 ms, and capture epochs/overruns zero. Thus the three-minute pass was
+  not repeatable acceptance. The owned recording was stopped at about 108
+  seconds and the video probe terminated; neither is a ten-minute pass.
+  Recorder counters showed 1,417 video frames, zero video/audio queue drops
+  and 532 inserted silence frames. The saved 108.053-second H.264/AAC file
+  strictly decoded, SHA-256
+  `fb60deabf0a129079644def625610a7097f1de7d1ad80ba1f3e1c127a1dfab8d`.
+  Settings restored successfully. Evidence: `/tmp/espkvm-nonblocking-250-long`.
+
+A subsequent 120-second audio-only TCP trace completed with 119.430 seconds
+received, 550 ms device-reported gaps and a 220.884 ms maximum successful send.
+The receiver trace contained 23,913 data packets, no repeated/out-of-order
+sequence ranges and a minimum raw advertised receive window of 65,535.
+At the longest pause, a 960-byte block split into 512 + 448 bytes with
+212.116 ms between arrivals; the first part was acknowledged locally after
+70 microseconds. Another adjacent split paused 210.112 ms. Thus receiver
+window exhaustion or a locally delayed ACK was not visible at those stalls.
+This receiver-side observation cannot prove when the ESP received the ACK,
+or distinguish Wi-Fi loss/queuing from device-side allocation/scheduling.
+The capture reported zero kernel drops; only textual packet summaries were
+saved locally (`/tmp/espkvm-tcp-audio`), with no raw packet file published.
+The observation client completed normally; the capture wrapper's initial stop
+missed the privileged child, which was then explicitly stopped and verified.
+
+Retain this as a draft transport experiment: nonblocking retries improve
+control of stalled writes but do not resolve PCM continuity. Do not merge on
+this evidence. The next investigation should correlate TCP retransmissions,
+receiver window/ACK timing and device send stalls, rather than continuing to
+increase deadlines. HTTPS, subjective listening and physical latency remain
+unverified.
+
+Production-function host TX and WebSocket pacing tests passed, as did the
+Function EV app build without compiler warnings. Raw movie captures/logs remain
+local under `/tmp/espkvm-nonblocking-01` and `/tmp/espkvm-nonblocking-250`.
+
+## Plain HTTP complete-write handling (2026-10-17)
+
+Fork implementation: [3585933](https://github.com/ZacharyLeahan/espkvm-xbox/commit/3585933),
+revised by [f41eab0](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f41eab0).
+This is a focused correction to our transport wrapper, not a newly adopted
+upstream commit. IDF's WebSocket sender checks only negative send results;
+a short positive plain-HTTP write could otherwise advance framing too early.
+Plain HTTP now completes partial writes under the per-session lock and shuts
+down an incomplete connection on failure. TLS keeps its existing path.
+
+The socket's SO_SNDTIMEO remains in effect for each blocking call, including
+PCM's 100 ms setting. A separate five-second deadline bounds retries between
+calls; it is not a hard wall-clock cap on a blocking send or lock acquisition.
+EAGAIN/EWOULDBLOCK ends a stalled write without renewing its timeout; EINTR
+yields before retrying. Incomplete-write logs retain byte counts and errno,
+without payloads. No endpoint shape, authentication, queue or bitrate defaults
+were changed.
+
+**Rejected first iteration:** an overall budget equal to the short PCM socket
+timeout was too restrictive for partial completion. Its combined movie attempt
+lost the PCM connection after approximately 26 seconds (1,241,280 frames sent),
+with 105 ms confirmed gaps and a 141.516 ms final failed send. The exact failed
+return was not instrumented, so deadline expiry was not directly observed.
+The owned recording was stopped after about 177 seconds; the viewer was
+terminated deliberately before its requested duration. The recording helper
+correctly failed `Parallel network audio capture failed`, while its saved
+H.264/AAC tracks decoded. `VIDEO/up-000037.ts` had 45,845,680 bytes, zero recorder
+queue drops and 980 inserted silence frames. Settings were restored. This
+failed attempt remains local under `/tmp/espkvm-http-endurance-01/`.
+
+The revision preserves per-call timeout semantics and tests a short successful
+write that consumes 100 ms before the remaining bytes are sent. Host tests
+cover partial success/failure, zero return, EINTR, fatal errors, retry deadline,
+stale sessions and the existing TLS/session-lock behavior. Fragment pacing
+tests and the revised hardware-profile build passed without new warnings.
+
+**Revised smoke test:** a 60-second movie clip, `VIDEO/up-000044.ts`, passed
+strict video/AAC decoding with zero recorder queue drops and 280 inserted
+silence frames. Live PCM completed with 59.660 s received over 60.010 s wall
+time, 325 ms confirmed gaps, no epoch change and a 94.693 ms longest successful
+send. Its final incomplete-write log followed the observer's normal closure.
+The viewer completed 55.0 s with 517 frames, 9.4 fps, 1283 kbit/s, 39 keyframes
+and ACKs. The one-minute pass does not establish uninterrupted endurance or
+a causal explanation for the earlier malformed frame. Evidence is local under
+`/tmp/espkvm-http-smoke-02/`.
+
+### Revised ten-minute movie trial
+
+**Video duration and recorded-track decoding passed; uninterrupted live audio
+failed.** The same 720p/60 HDMI movie source, H.264 4000 kbit/s target, 30-fps
+cap, 40 ms PCM queue and 8192-byte TCP buffer were used. Sampling stayed off.
+The browser viewer was paused; one measured viewer ran for 570 seconds.
+
+- The original video connection completed all 570.0 s: 5,037 frames, 8.8 fps,
+  1128 kbit/s, 341 keyframes and ACKs. No malformed WebSocket frame was observed.
+  This bounded pass does not prove the old failure's cause or long-term absence.
+- The original PCM connection failed around 166 s. The new log captured
+  `incomplete write bytes=512/960 errno=11` (EAGAIN), with a 1.158 s failed
+  send. It sent 7,902,960 complete frames, had 48,240 confirmed gap frames
+  (1.005 s), no epoch reset and a 332.561 ms longest successful send. This
+  establishes partial progress followed by a socket error, not its underlying
+  Wi-Fi/TCP cause. A 100 ms socket timeout did not bound observed wall time.
+- A replacement PCM observer completed 280.003 s, receiving 278.840 s of audible
+  audio. It had 1.135 s confirmed gaps, no epoch change and a 373.416 ms longest
+  successful send. Final errno 104 logs followed normal probe closures and are
+  separate from the earlier errno 11 failure. The retry does not erase that
+  failure. There was a period with no network audio listener, so this is not
+  ten uninterrupted minutes of three consumers.
+- `VIDEO/up-000139.ts` saved 121,839,604 bytes and 6,358 video frames. H.264 and
+  stereo 48 kHz AAC-LC decoded strictly; audio duration was 600.021333 s, RMS
+  0.010511, with 38,254,161 active decoded samples. Recorder queue drops were
+  zero; 118 silence frames (2.46 ms) were inserted. Capture-overrun samples
+  remained zero. AAC packet times were continuous to approximately 1 us
+  rounding precision; this is not a physical A/V synchronization measurement.
+- The recording helper correctly returned failure for its original parallel
+  audio observer while retaining `decode_passed: true`. Original settings
+  were restored and the browser resumed. The revised HTTP firmware remains
+  installed for evaluation; [PR #7](https://github.com/ZacharyLeahan/espkvm-xbox/pull/7)
+  remains draft/unmerged, stacked on the diagnostic PR #6.
+
+Nineteen active-recording samples after startup had 44,423..64,363 bytes
+internal free and 12,793,256..12,830,064 bytes PSRAM free. The post-recording
+sample had 87,355 and 16,807,492 bytes respectively. No progressive loss was
+apparent in this bounded test. Status/log/memory sampling every approximately
+30 seconds is part of the load. The monitor's console summary omitted the
+listener flag; the detailed saved status correctly shows the original listener
+ended before the three-minute observation.
+
+Decision: retain the tested complete-write correction for review, but do not
+mark live PCM continuity resolved or infer a causal performance improvement
+from different movie scenes. Further work must address send stalls/timeouts
+and repeat the combined test without reconnecting either live consumer. Raw
+media and logs stay local in `/tmp/espkvm-http-endurance-02/`. Saved-file SHA-256:
+`a35758ef2b40dd6fcaef36f2cb9437e20f612b686cb76f80f2d67360b9f546f3`.
+
 ## Audible movie endurance follow-up (2026-10-17)
 
 **Recording validation passed; uninterrupted live streaming failed.** The user

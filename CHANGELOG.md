@@ -9,10 +9,22 @@ bumps the patch).
 
 ### Diagnostics
 
+- Correlate optional TCP stall snapshots with C6 receive counters, valid ACKs
+  entering the P4 stack, and the radio power-save readback.
+
+- Add default-off TCP queue and retry timing diagnostics for stalled HTTP PCM
+  sends, including IPv4-mapped socket matching.
+
 - Add opt-in PCM sender task-state sampling with separate successful-write and
   disconnect counts; leave it disabled by default to avoid playback overhead.
 
 ### Fixed
+
+- Bound plain-HTTP send retries with nonblocking writes; allow PCM stalls up to
+  250 ms. Live audio continuity remains under investigation.
+
+- Complete short plain-HTTP writes before advancing WebSocket framing, and
+  close connections when a payload cannot be completed.
 
 - Flush CPU-edited H.264 SPS/frame data before the output buffer is reused by
   encoder DMA, preventing dirty cache lines from overwriting later frames.
