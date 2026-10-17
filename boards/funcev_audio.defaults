@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Opt-in C790 I2S wiring verified on Function EV PCB v1.6, P4 rev 3.2.
+# Apply after funcev_p4.defaults and funcev_xbox.defaults; see docs/HDMI-AUDIO.md.
+# CSI carries video; these separate inputs receive HDMI audio from C790 J4.
+# GPIO22 conflicts with the round SPI LCD's default CS; use the tested DSI LCD.
+CONFIG_KVM_ENABLE_AUDIO=y
+CONFIG_KVM_AUDIO_BCLK=22
+CONFIG_KVM_AUDIO_WS=53
+CONFIG_KVM_AUDIO_DIN=27
+CONFIG_KVM_AUDIO_RATE=48000
+CONFIG_KVM_AUDIO_SLOT_BITS=32

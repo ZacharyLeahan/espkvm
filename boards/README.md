@@ -67,6 +67,16 @@ reset/addr) match the Waveshare reference and are inherited. The RMII data pins
 and the BOOT button GPIO should be taken from the board schematic and set in the
 overlay if a given board differs.
 
+### Xbox HDMI audio overlay (opt-in)
+
+`funcev_audio.defaults` enables C790 I2S input on GPIO22/53/27 at 48 kHz,
+using separate audio wiring. Apply it after `funcev_p4.defaults` and
+`funcev_xbox.defaults`; the tested local display also uses
+`funcev_dsi_live.defaults`. GPIO22 conflicts with the round SPI LCD's default
+CS. See [wiring and the full build command](../docs/HDMI-AUDIO.md#wiring-and-configuration)
+and the [validation record](../docs/AUDIO-VALIDATION-2026-10-16.md).
+The Xbox profile uses HTTP and contains no credentials.
+
 ## Configured from datasheets, not yet tested
 
 These two boards have a build target configured entirely from their datasheets -

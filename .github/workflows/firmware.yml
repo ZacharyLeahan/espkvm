@@ -46,6 +46,7 @@ jobs:
       - run: components/kvm_runbook/test/run.sh
       # The cron parser and matcher.
       - run: components/kvm_sched/test/run.sh
+      - run: python3 -m unittest discover -s tools -p test_observe_audio.py
 
   # The console's own logic: the fake machine the demo runs on, the settings
   # file, the keyboard tables, the text layer. Node runs the TypeScript as it
