@@ -262,6 +262,29 @@ Run: https://github.com/ZacharyLeahan/espkvm-xbox/actions/runs/39000357167.
 The new diagnostic timeout change is locally tested and will receive its own
 published revision; this CI run does not cover that later change.
 
+## CI-discovered Ethernet build correction (2026-10-16)
+
+The first published matrix found missing `CONFIG_KVM_WIFI_DEFAULT_SSID` and
+`CONFIG_KVM_WIFI_DEFAULT_PASSWORD` definitions in Ethernet-only profiles
+(`p4-eth`, `p4-eth-rev3`, `m5-poe-p4`). Kconfig intentionally omits these symbols
+when Wi-Fi is disabled, but the settings schema remains compiled. Firmware
+[399ee07](https://github.com/ZacharyLeahan/espkvm-xbox/commit/399ee07952d0fb14e8fc663597bbbc559592ddfe)
+supplies empty defaults only when those symbols are absent, preserving configured
+Wi-Fi defaults. This is a fork integration correction, not an additional
+upstream feature adoption.
+
+A clean ESP-IDF 6.1 build using only public `sdkconfig.defaults` passed with
+Wi-Fi disabled, Ethernet enabled and task tracing enabled. Only previously
+recorded Microlink unused-symbol warnings appeared. Build-generated removal of
+optional dependencies was discarded; the published dependency lock was retained.
+The fix and bounded-handshake diagnostic commit were pushed. Their new CI run
+is https://github.com/ZacharyLeahan/espkvm-xbox/actions/runs/39000741196;
+it completed successfully on code commit `399ee07`: 26 test/build jobs passed,
+with two release-only jobs skipped. This includes the three originally failing
+Ethernet-only profiles and both Function EV revisions. Later changes in this
+checkpoint are documentation only; physical and authenticated acceptance gates
+remain open.
+
 ## Video adaptation progress (2026-10-16)
 
 This implementation update follows the reconciliation above; it does not mark
