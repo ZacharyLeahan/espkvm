@@ -29,7 +29,8 @@ idf.py menuconfig                 # settings live under the "ESP-KVM" menu
 ## Web console
 
 The console is Vue 3 + Vite and lives in a **git submodule** at `web/`
-([espkvm/console](https://github.com/espkvm/console)). Clone with `--recursive`
+([Xbox console fork](https://github.com/ZacharyLeahan/espkvm-console-xbox),
+from [espkvm/console](https://github.com/espkvm/console)). Clone with `--recursive`
 (or `git submodule update --init`), or `web/` is empty. It builds to a single
 gzipped file that the firmware embeds. **After changing anything under `web/`,
 rebuild it and then rebuild the firmware** so the new bundle is embedded:
@@ -64,13 +65,16 @@ components/
 third_party/microlink/  git submodule (espkvm/microlink, branch idf6): native
                   Tailscale client; bundles the wireguard_lwip stack that BOTH
                   kvm_ts and kvm_wg use (see gotchas)
-web/              Vue 3 console (git submodule: espkvm/console)
+web/              Vue 3 console (git submodule: ZacharyLeahan/espkvm-console-xbox)
 main/             app_main and start-up order
 docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
 ```
 
 ## Conventions
 
+- `main` is the maintained Xbox branch in `ZacharyLeahan/espkvm-xbox`.
+  Keep `upstream` pointing at `espkvm/espkvm`; use focused feature branches for
+  review. `xbox-experiments` is retained as historical work.
 - For this Xbox fork, track upstream consideration in `docs/UPSTREAM-REVIEW.md`.
   Record source commit URLs, explicit decisions, adaptation scope, and tests.
   Adapted commits carry an `Adapted-from:` source URL; add our implementation
@@ -92,7 +96,9 @@ docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
   (`plugins/espkvm/skills/operate/SKILL.md`), and the MCP server in
   [espkvm/mcp](https://github.com/espkvm/mcp). Change an endpoint's shape, its
   auth, or one of its error codes and update them too - a document that drifts
-  from the API is worse than none.
+  from the API is worse than none. Xbox API documentation is published in
+  [our skills fork](https://github.com/ZacharyLeahan/espkvm-skills-xbox/tree/xbox-audio).
+  If a companion repository is inaccessible, record the gap explicitly.
 - Keep commits small and messages short and imperative, matching the log.
 - Versions come from git tags (`v.0.X.Y`); a tag triggers the CI release. Record
   user-facing changes in `CHANGELOG.md` under `[Unreleased]`.

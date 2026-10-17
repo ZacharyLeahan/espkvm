@@ -7,7 +7,33 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Fixed
+
+- Correct inherited TC358743 audio register addresses, clock recovery masks,
+  and delay-field encoding so I2S output can actually be configured.
+- Restore the TC358743 audio PLL enable after HDMI detection. Its ANA_CTL
+  register resets in DVI mode, leaving I2S clocks stopped despite audio packets.
+- Explicitly initialize audio GPIOs as inputs and log partial-read failures.
+- Reduce audio TCP framing overhead and worker memory; start I2S only when the
+  streaming task is ready to drain the receiver, and recover from brief overruns.
+- Honor the P4 SDIO PSRAM allocation preference so simultaneous audio/video
+  transfer buffers do not unnecessarily exhaust internal DMA memory. The Xbox
+  profile also prefers PSRAM for TCP packet allocations.
+
+### Added
+
+- Experimental, opt-in C790 I2S audio for the remote viewer, with volume, source
+  meter, bounded playback buffering, capture diagnostics and bounded WAV evidence.
+  Established browser streams reconnect after brief network interruptions,
+  with bounded retries and cancellation on mute.
+  Requires separate wiring and matching PCM format. Live stereo PCM capture
+  verified in a one-minute simultaneous video test, with brief recovered gaps;
+  physical playback latency remains unmeasured.
+
 ### Changed
+- Rename the fork to `espkvm-xbox` and maintain the tested Xbox integration on
+  `main`; retain `xbox-experiments` as history. Shorten the README while preserving
+  credits and detailed hardware/test records in the documentation.
 - Add the receipt-verified eBay Xbox controller-port adapter, seller, price,
   listing link, and DEVICE-port cabling to the README hardware list.
 - Refresh the README with the real-Xbox video/input demo, measured recording

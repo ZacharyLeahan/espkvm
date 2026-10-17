@@ -327,13 +327,17 @@ the old one.
 A register dump of both banks, for whoever picks this up, is in
 `ignore/m5poe-lt6911-7-dump.log`.
 
-## The bridge's audio output - read off the wiki, not off a board
+## The bridge's audio output
 
-Everything above was measured here; this section was not. Nothing in the
-firmware captures audio yet, so none of it is proved.
+Experimental audio capture and browser playback now exist (see
+[HDMI-AUDIO.md](HDMI-AUDIO.md)). On 2026-10-16, the Function EV wiring below
+produced non-silent stereo 48 kHz PCM after fixing the bridge audio PLL enable.
+The final one-minute combined audio/video test stayed connected and captured
+59.64 seconds of sound, with brief recovered gaps. Physical playback latency
+and the voltage discussion below remain unmeasured.
 
 The TC358743 pulls the audio out of the HDMI stream and hands it over as I2S,
-and `set_hdmi_audio()` in `components/tc358743` already turns that on. The C790
+and `set_hdmi_audio()` plus HDMI-mode audio PLL restoration configure it. The C790
 brings those signals out on a separate 5-pin connector on its left edge, next to
 the HDMI socket. They are not on the 15-pin CSI ribbon, which carries the video
 lanes, I2C, 3.3 V and ground and nothing else. Geekworm puts a cable for it in

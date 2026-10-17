@@ -1,8 +1,10 @@
-# Xbox experiment fork
+# Original Xbox fork
 
 Upstream: https://github.com/espkvm/espkvm (original attribution and licensing
-are preserved). Xbox changes live on the `xbox-experiments` branch of
-https://github.com/ZacharyLeahan/espkvm, with no upstream pull request.
+are preserved). The maintained branch is `main` in
+https://github.com/ZacharyLeahan/espkvm-xbox. `xbox-experiments` is retained as
+history; use focused feature branches when preparing upstream contributions.
+No upstream pull request is part of this update.
 
 ## Current state
 
@@ -14,8 +16,10 @@ frames/sec. With reduced TCP buffers, a ten-minute local Wi-Fi test at a
 while the full console was also viewing. Xbox reboot recovery and a short
 720p60 game capture check succeeded. This is not 60-FPS browser video or a
 guarantee of zero gaps; longer-term and remote-link testing remain open. See
-[measured results](XBOX-CAPTURE-DEBUG.md). Xbox controller emulation is only a
-[proposal](XBOX-REMOTE-CONTROLLER.md), not an implemented feature.
+[measured results](XBOX-CAPTURE-DEBUG.md). Xbox USB XID emulation, Bluetooth
+controller forwarding, and the local input overlay are implemented; see the [controller notes](XBOX-REMOTE-CONTROLLER.md)
+and [test guide](XBOX-TESTING.md). Separate I2S wiring also enables experimental
+[browser audio](HDMI-AUDIO.md).
 
 ## Build
 
@@ -27,8 +31,8 @@ updates/sec during a 720p game. The helper below remains browser-only.
 Use ESP-IDF 6.1 and initialize submodules:
 
 ```sh
-git clone --recursive --branch xbox-experiments https://github.com/ZacharyLeahan/espkvm.git
-cd espkvm
+git clone --recursive https://github.com/ZacharyLeahan/espkvm-xbox.git
+cd espkvm-xbox
 . tools/env.sh
 # Optional: copy .env.example to .env and fill in WIFI_SSID and WIFI_PASSWORD.
 cp .env.example .env
@@ -75,8 +79,15 @@ for other deployments.
 
 ## Dependency changes
 
-The web console remains pinned to upstream `espkvm/console`. The microlink
+The web console is pinned to the tested audio commit in
+[`ZacharyLeahan/espkvm-console-xbox`](https://github.com/ZacharyLeahan/espkvm-console-xbox),
+a fork of `espkvm/console`. The microlink
 submodule is pinned to `ZacharyLeahan/microlink`, branch `xbox-experiments`,
 which preserves the existing `espkvm/microlink` idf6 base and removes per-data-
 packet WireGuard logging from the receive hot path. Clone recursively to include
 that change. No pull request to either upstream repository is part of this work.
+
+The audio REST contract is published in the [skills fork](https://github.com/ZacharyLeahan/espkvm-skills-xbox/tree/xbox-audio).
+The upstream MCP repository returned HTTP 404 during this work, so its audio
+integration remains unverified. The bounded `tools/observe_audio.py` capture tool
+and [validation record](AUDIO-VALIDATION-2026-10-16.md) are available for agent testing.
