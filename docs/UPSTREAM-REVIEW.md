@@ -217,6 +217,32 @@ and `psramLargest` from `cae095f`. Companion API contract:
   locks. Review task lifetime on this two-core IDF build before copying that
   implementation. This does not defer the requested diagnostic scope permanently.
 
+## Microlink reconnect adaptation (2026-10-16)
+
+Dependency implementation: [d3210a0](https://github.com/ZacharyLeahan/microlink/commit/d3210a0523766d6917706aa643750082f61d49f8), adapting `5129dc2`
+on top of the six reliability cherry-picks listed above. Parent pin/publication
+and integrated VPN validation remain outstanding.
+
+- Preserve keys when moving a validated session between direct and DERP paths,
+  retain in-flight initiation, request recovery after unanswered data, bound
+  CallMeMaybe traffic and remove problematic voice-queue UDP marking.
+- LAN interface iteration runs through `esp_netif_tcpip_exec`, as the local IDF
+  `esp_netif_next_unsafe` contract recommends. It filters down/unaddressed/
+  loopback interfaces, deduplicates addresses and bounds output. Changed endpoint
+  update and peer-status reads also take the lwIP core lock.
+- Production-function sanitizer checks passed for TCP/IP-context enumeration,
+  duplicate/invalid addresses, output capacity and execution failure; path changes
+  preserve keys, an in-flight handshake is not restarted, and only unanswered
+  data triggers the additional recovery policy. These mocks do not exercise
+  real crypto, packet queues, DNS, DERP transport or radio behavior.
+- The combined audio-enabled firmware build passed without warnings in the
+  incremental build. Existing logging suppression and task stack sizes remain.
+  No C6 firmware changes, adaptive recording-quality changes or ACME were added.
+- A read-only device check succeeded at `192.168.1.169`: HDMI locked at 1280x720,
+  MJPEG selected, recording inactive. The installed image still lacks the new
+  freshness fields, confirming the new build has not been flashed. This is
+  reachability evidence only, not verification of this adaptation.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
