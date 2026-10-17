@@ -5,7 +5,10 @@ cmake_minimum_required(VERSION 3.22)
 # Native Tailscale (microlink) lives in a submodule; its component and the nested
 # wireguard_lwip it bundles are discovered here. Only kvm_net REQUIRES it, so it
 # is compiled in but stays dormant unless the ts_* settings turn it on.
-set(EXTRA_COMPONENT_DIRS third_party/microlink/components)
+# Use real paths so source copies do not depend on preserving the symlink.
+set(EXTRA_COMPONENT_DIRS
+    third_party/microlink/components/microlink
+    third_party/microlink/components/microlink/components)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(espkvm)

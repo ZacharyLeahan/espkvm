@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Fixed
 
+- Discover Microlink and WireGuard by their real component paths so source
+  copies can build without preserving the dependency symlink.
+
 - Expose CSI frame count and frame age independently of encoder activity, and
   report the largest free PSRAM block alongside total free memory.
 
