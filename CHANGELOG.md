@@ -9,6 +9,10 @@ bumps the patch).
 
 ### Fixed
 
+- Add H.264 SPS no-reorder signaling on both encoder paths, with bounded
+  rewriting that preserves access units when there is no room or the parameter
+  set is unsupported. Recording bitrate policy is unchanged.
+
 - Bound HDMI bridge register transfers and stop a failed timing poll after its
   first error, preserving audio PLL recovery. Keep capture initialization alive
   when a source starts in an oversized mode so a supported mode can recover.

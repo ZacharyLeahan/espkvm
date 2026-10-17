@@ -15,6 +15,7 @@ idf_component_register(
         "capture_dsi_preview.c"
         "capture_lcd_control.c"
         "h264_probe.c"
+        "h264_sps.c"
         "video_frame.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
