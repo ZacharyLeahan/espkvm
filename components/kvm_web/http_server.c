@@ -4062,7 +4062,10 @@ static void video_pump_task(void *arg)
          * IDR now and the repair arrives within a frame or two instead of at the
          * next scheduled keyframe.
          */
-        const bool reference_gap = last_seq != 0 && (uint32_t)(f.seq - last_seq) > 1u &&
+        /* An IDR already repairs every skipped reference. Asking for another
+         * while sending this large frame creates a needless IDR cascade. */
+        const bool reference_gap = !f.keyframe && last_seq != 0 &&
+                                   (uint32_t)(f.seq - last_seq) > 1u &&
                                    f.payload == VIDEO_PAYLOAD_H264;
         if (reference_gap) {
             video_request_repair_idr();

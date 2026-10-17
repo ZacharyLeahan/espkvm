@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Fixed
 
+- Avoid requesting another H.264 recovery keyframe when the current frame is
+  already a keyframe. Video diagnostics now fail on an early socket close.
+
 - Add authenticated heap and task-stack diagnostics with owned task metadata
   copied during a coordinated two-core snapshot. Report snapshot duration and
   explicit unavailability when memory or task tracing cannot support it.

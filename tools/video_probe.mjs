@@ -38,6 +38,7 @@ let bytes = 0;
 let keyframes = 0;
 let started = 0;
 let acknowledgements = false;
+let finishing = false;
 
 /** NAL unit types in an Annex-B frame: 7 SPS, 8 PPS, 5 IDR, 1 inter-coded. */
 function nals(buf) {
@@ -61,6 +62,7 @@ ws.on("open", () => {
   ws.send(Buffer.from([1]));
   started = Date.now();
   setTimeout(() => {
+    finishing = true;
     const secs = (Date.now() - started) / 1000;
     console.log(
       `\n${frames} frames in ${secs.toFixed(1)}s = ${(frames / secs).toFixed(1)} fps, ` +
@@ -113,5 +115,12 @@ ws.on("message", (data) => {
 
 ws.on("error", (e) => {
   console.error("ws error:", e.message);
+  process.exit(1);
+});
+
+ws.on("close", (code) => {
+  if (finishing) return;
+  console.error(`video socket closed early (code ${code}, ${frames} frames)`);
+  if (dump) dump.end();
   process.exit(1);
 });
