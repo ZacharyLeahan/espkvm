@@ -181,6 +181,8 @@ permanent `xbox-experiments` branch is not required for upstream review.
 
 ## Shared HDMI capture and microSD AAC (2026-10-16)
 
+Implementation and tests: [1e83a01](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1e83a01).
+
 This fork adds an independent I2S producer with bounded browser and recorder
 queues, recorder-side AAC accumulation on the video clock, AAC in MPEG-TS, and
 AAC-preserving MP4 remuxing. Network disconnect and backpressure do not own the
