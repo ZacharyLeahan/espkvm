@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "video_ack.h"
+#include "lwip/tcp.h"
 #include "http_server.h"
 
 #include "sdkconfig.h" /* the CONFIG_ guards below are read before any of them */
@@ -2621,19 +2622,63 @@ static httpd_handle_t s_redirect_httpd;
  * with heap poisoning caught the jump through ssl->f_send read back as
  * 0xfefefefe, the pattern IDF fills freed memory with.
  *
- * So every send goes through ws_send_frame(), which holds s_tx_mu and checks
- * the socket is still listed. http_sess_close_cb takes the same lock to unlist
- * it, which also waits out a send already under way before the teardown
- * continues. A send is bounded by the 400 ms SO_SNDTIMEO set in
- * video_add_client(), so that wait is short.
+ * Each session has a recursive write lock; the table lock is held only while
+ * finding or unlisting it. Close waits for that session's writer before freeing
+ * its TLS context. A slow viewer cannot hold the control session's lock.
+ * TLS retries respect the socket timeout, including the shorter PCM deadline.
  *
  * The table only has to hold one server's sessions: max_open_sockets is 12
  * plain and 7 with TLS, and the port 80 redirect server has its own config
  * with neither callback.
  */
 #define TX_MAX_SOCKETS 16
-static SemaphoreHandle_t s_tx_mu;
+static SemaphoreHandle_t s_tx_mu; /* the table; held only to read or change it */
 static int s_tx_fds[TX_MAX_SOCKETS];
+/* One write lock a session, so a slow viewer holds up only its own socket. A
+ * single lock for all of them let one video frame to a slow Wi-Fi client stall
+ * the server task's pongs and replies for seconds. The generation tells a
+ * waiting sender that its session closed and the slot was reused meanwhile. */
+static SemaphoreHandle_t s_tx_slot_mu[TX_MAX_SOCKETS];
+static uint32_t s_tx_gen[TX_MAX_SOCKETS];
+
+/* Take the write lock of fd's session. Returns its slot, or -1 when the
+ * session is not listed (closed, or never opened by us). */
+static int tx_lock(int fd)
+{
+    if (!s_tx_mu || fd < 0) {
+        return -1;
+    }
+    int slot = -1;
+    uint32_t gen = 0;
+    (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
+    for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+        if (s_tx_fds[i] == fd) {
+            slot = i;
+            gen = s_tx_gen[i];
+            break;
+        }
+    }
+    xSemaphoreGiveRecursive(s_tx_mu);
+    if (slot < 0) {
+        return -1;
+    }
+    (void)xSemaphoreTakeRecursive(s_tx_slot_mu[slot], portMAX_DELAY);
+    (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
+    const bool same = s_tx_fds[slot] == fd && s_tx_gen[slot] == gen;
+    xSemaphoreGiveRecursive(s_tx_mu);
+    if (!same) {
+        xSemaphoreGiveRecursive(s_tx_slot_mu[slot]);
+        return -1;
+    }
+    return slot;
+}
+
+static void tx_unlock(int slot)
+{
+    if (slot >= 0) {
+        xSemaphoreGiveRecursive(s_tx_slot_mu[slot]);
+    }
+}
 /* The control WebSockets, which is where a notice for everybody goes. */
 static int s_ctrl_fds[TX_MAX_SOCKETS];
 
@@ -2646,7 +2691,7 @@ static void video_remove_client(int fd);
  * to send to - callers drop the client either way.
  */
 /*
- * The TLS server's send, under s_tx_mu.
+ * The TLS server's send, under its session's write lock.
  *
  * s_tx_fds only covers the sends made from our own tasks. The server writes to
  * the same sessions from its task too - the reply to a WebSocket ping or close,
@@ -2668,32 +2713,49 @@ typedef struct {
 static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_t buf_len, int flags)
 {
     (void)flags;
+    const int slot = tx_lock(sockfd);
+    if (slot < 0) return HTTPD_SOCK_ERR_FAIL;
+    /* Acquire the session lock before reading a context teardown can free. */
     const https_transport_head_t *ctx = httpd_sess_get_transport_ctx(hd, sockfd);
     if (!ctx || !ctx->tls) {
+        tx_unlock(slot);
         return HTTPD_SOCK_ERR_FAIL;
     }
-    (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
-    const ssize_t ret = esp_tls_conn_write(ctx->tls, buf, buf_len);
-    xSemaphoreGiveRecursive(s_tx_mu);
-    return (int)ret;
+    /* Respect the PCM listener's 100 ms timeout. Other sessions retain their
+     * own send timeout, capped at five seconds. Never spin on WANT_WRITE. */
+    struct timeval timeout = {0};
+    socklen_t timeout_len = sizeof(timeout);
+    int64_t budget = 5000000;
+    if (getsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, &timeout_len) == 0) {
+        const int64_t configured = (int64_t)timeout.tv_sec * 1000000 + timeout.tv_usec;
+        if (configured > 0 && configured < budget) budget = configured;
+    }
+    const int64_t deadline = esp_timer_get_time() + budget;
+    size_t done = 0;
+    while (done < buf_len && esp_timer_get_time() < deadline) {
+        const ssize_t ret = esp_tls_conn_write(ctx->tls, buf + done, buf_len - done);
+        if (ret > 0 && (size_t)ret <= buf_len - done) {
+            done += (size_t)ret;
+        } else if (ret == 0 || ret == ESP_TLS_ERR_SSL_WANT_WRITE || ret == ESP_TLS_ERR_SSL_WANT_READ) {
+            vTaskDelay(1);
+        } else {
+            break;
+        }
+    }
+    /* HTTPD's WebSocket sender does not repair a short payload write. Return
+     * only a complete write or an error, and make a partial stream unusable. */
+    if (done != buf_len) shutdown(sockfd, SHUT_RDWR);
+    tx_unlock(slot);
+    return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
 }
 
 static esp_err_t ws_send_frame(httpd_handle_t server, int fd, httpd_ws_frame_t *frame)
 {
-    if (!server || fd < 0 || !s_tx_mu) {
-        return ESP_FAIL;
-    }
-    if (xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) != pdTRUE) {
-        return ESP_FAIL;
-    }
-    esp_err_t err = ESP_ERR_INVALID_STATE; /* closed under us */
-    for (int i = 0; i < TX_MAX_SOCKETS; i++) {
-        if (s_tx_fds[i] == fd) {
-            err = httpd_ws_send_frame_async(server, fd, frame);
-            break;
-        }
-    }
-    xSemaphoreGiveRecursive(s_tx_mu);
+    if (!server || fd < 0 || !s_tx_mu) return ESP_FAIL;
+    const int slot = tx_lock(fd);
+    if (slot < 0) return ESP_ERR_INVALID_STATE;
+    const esp_err_t err = httpd_ws_send_frame_async(server, fd, frame);
+    tx_unlock(slot);
     return err;
 }
 
@@ -2711,6 +2773,8 @@ static esp_err_t ws_send_paced(httpd_handle_t server, int fd, const httpd_ws_fra
         return ws_send_frame(server, fd, &whole);
     }
 
+    const int slot = tx_lock(fd);
+    if (slot < 0) return ESP_ERR_INVALID_STATE;
     size_t off = 0;
     while (off < frame->len) {
         const size_t n = (frame->len - off < piece) ? frame->len - off : piece;
@@ -2723,6 +2787,7 @@ static esp_err_t ws_send_paced(httpd_handle_t server, int fd, const httpd_ws_fra
         };
         const esp_err_t err = ws_send_frame(server, fd, &part);
         if (err != ESP_OK) {
+            tx_unlock(slot);
             return err;
         }
         off += n;
@@ -2733,6 +2798,7 @@ static esp_err_t ws_send_paced(httpd_handle_t server, int fd, const httpd_ws_fra
             vTaskDelay(1);
         }
     }
+    tx_unlock(slot);
     return ESP_OK;
 }
 
@@ -2852,11 +2918,26 @@ static void on_hid_leds(uint8_t leds, void *user)
 /** A new session may be written to from now on. See s_tx_fds. */
 static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
 {
+    const int one = 1;
+    (void)setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    /* IDF excludes async requests (PCM/MJPEG/uploads) from LRU eviction.
+     * WebSockets are synchronous sessions, so keep them newer than idle HTTP
+     * connections when another session opens. All-active exhaustion can still
+     * evict a WebSocket; this is preference, not a reservation. */
+    size_t n = CONFIG_LWIP_MAX_SOCKETS;
+    int fds[CONFIG_LWIP_MAX_SOCKETS];
+    if (httpd_get_client_list(hd, &n, fds) == ESP_OK) {
+        for (size_t i = 0; i < n; i++) {
+            if (fds[i] != sockfd && httpd_ws_get_fd_info(hd, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+                (void)httpd_sess_update_lru_counter(hd, fds[i]);
+            }
+        }
+    }
     if (!s_tx_mu || sockfd < 0 || xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) != pdTRUE) {
         return ESP_OK;
     }
     /* On the TLS server every write to this session - ours and the server's
-     * own - now takes s_tx_mu. See locked_ssl_send. */
+     * own - now takes the session write lock. See locked_ssl_send. */
     if (httpd_sess_get_transport_ctx(hd, sockfd)) {
         (void)httpd_sess_set_send_override(hd, sockfd, locked_ssl_send);
     }
@@ -2871,6 +2952,7 @@ static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
         for (int i = 0; i < TX_MAX_SOCKETS; i++) {
             if (s_tx_fds[i] < 0) {
                 s_tx_fds[i] = sockfd;
+                s_tx_gen[i]++;
                 break;
             }
         }
@@ -2890,13 +2972,12 @@ static void http_sess_close_cb(httpd_handle_t hd, int sockfd)
      * stops the next send and waits out the one that may be running. See
      * s_tx_fds.
      */
-    if (s_tx_mu && xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) == pdTRUE) {
-        for (int i = 0; i < TX_MAX_SOCKETS; i++) {
-            if (s_tx_fds[i] == sockfd) {
-                s_tx_fds[i] = -1;
-            }
-        }
+    const int slot = tx_lock(sockfd);
+    if (slot >= 0) {
+        (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
+        s_tx_fds[slot] = -1;
         xSemaphoreGiveRecursive(s_tx_mu);
+        tx_unlock(slot);
     }
 
     /*
@@ -4530,8 +4611,17 @@ httpd_handle_t http_server_start(void)
         for (int i = 0; i < TX_MAX_SOCKETS; i++) {
             s_tx_fds[i] = -1;
         }
-        s_tx_mu = xSemaphoreCreateRecursiveMutex();
+        bool slots = true;
+        for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+            s_tx_slot_mu[i] = xSemaphoreCreateRecursiveMutex();
+            if (!s_tx_slot_mu[i]) { slots = false; break; }
+        }
+        s_tx_mu = slots ? xSemaphoreCreateRecursiveMutex() : NULL;
         if (!s_tx_mu) {
+            for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+                if (s_tx_slot_mu[i]) vSemaphoreDelete(s_tx_slot_mu[i]);
+                s_tx_slot_mu[i] = NULL;
+            }
             /* Without it every send would be racing the session teardown. */
             ESP_LOGE(TAG, "tx mutex");
             return NULL;

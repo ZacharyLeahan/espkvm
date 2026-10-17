@@ -9,6 +9,11 @@ bumps the patch).
 
 ### Fixed
 
+- Serialize writes per connection so slow video sends do not hold the control
+  connection lock. Complete short TLS writes or fail the connection, yield on
+  retries, and retain the PCM socket timeout. Keep fragments of one video
+  message together and prefer active WebSockets over idle HTTP sessions.
+
 - Negotiate a two-frame acknowledgement window with compatible video viewers;
   ignore duplicate/stale acknowledgements and recover missing H.264 references
   with bounded keyframe requests. Older viewers keep their existing behavior.
