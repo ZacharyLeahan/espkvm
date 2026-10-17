@@ -2,6 +2,7 @@
  * Watch the device's video channel without a browser.
  *
  *   node tools/video_probe.mjs espkvm.local 6 [out.h264]
+ *   node tools/video_probe.mjs http://192.168.1.169 6 [out.h264]
  *
  * Prints frame type and size and, for H.264, the NAL units in each frame -
  * which is how you tell an IDR carrying its parameter sets from a P-frame.
@@ -24,15 +25,19 @@ const WebSocket = require("ws");
 const host = process.argv[2] ?? "espkvm.local";
 const seconds = Number(process.argv[3] ?? 5);
 const dumpPath = process.argv[4];
+const origin = host.includes("://") ? host : `wss://${host}`;
+const endpoint = new URL("/video", origin);
+endpoint.protocol = endpoint.protocol === "http:" ? "ws:" : endpoint.protocol === "https:" ? "wss:" : endpoint.protocol;
 
 const dump = dumpPath ? createWriteStream(dumpPath) : null;
 /* The device's certificate is self-signed, which is the point of it. */
-const ws = new WebSocket(`wss://${host}/video`, { rejectUnauthorized: false });
+const ws = new WebSocket(endpoint, { rejectUnauthorized: false });
 
 let frames = 0;
 let bytes = 0;
 let keyframes = 0;
 let started = 0;
+let acknowledgements = false;
 
 /** NAL unit types in an Annex-B frame: 7 SPS, 8 PPS, 5 IDR, 1 inter-coded. */
 function nals(buf) {
@@ -59,24 +64,36 @@ ws.on("open", () => {
     const secs = (Date.now() - started) / 1000;
     console.log(
       `\n${frames} frames in ${secs.toFixed(1)}s = ${(frames / secs).toFixed(1)} fps, ` +
-        `${((bytes * 8) / secs / 1000).toFixed(0)} kbit/s, ${keyframes} keyframes`,
+        `${((bytes * 8) / secs / 1000).toFixed(0)} kbit/s, ${keyframes} keyframes, ACKs=${acknowledgements}`,
     );
     if (dump) {
       dump.end();
       console.log(`wrote ${dumpPath}`);
     }
     ws.close();
-    process.exit(0);
+    process.exit(frames ? 0 : 1);
   }, seconds * 1000);
 });
 
 ws.on("message", (data) => {
   const buf = Buffer.from(data);
+  if (buf.length === 1 && buf[0] === 0x85) {
+    acknowledgements = true;
+    return;
+  }
+  if (buf.length <= 12 || buf[0] !== 0x4b) return;
   const type = buf[1];
+  if (type !== 1 && type !== 2) return;
   const w = buf.readUInt16LE(2);
   const h = buf.readUInt16LE(4);
   const seq = buf.readUInt32LE(6);
   const payload = buf.subarray(12);
+  if (acknowledgements) {
+    const ack = Buffer.alloc(5);
+    ack[0] = 0x09;
+    ack.writeUInt32LE(seq, 1);
+    ws.send(ack);
+  }
   frames++;
   bytes += payload.length;
 

@@ -100,6 +100,43 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## Combined-device validation checkpoint (2026-10-16)
+
+The application-only flash completed and the device served the new frame and
+memory diagnostics. No C6 update or card format was performed. These checks
+exercise the combined feature-branch image, not a published release.
+
+- A 30-second microSD test saved 442 video frames with zero recorder drops,
+  1280x720 H.264 and stereo 48 kHz AAC (30.08 seconds). Both tracks decoded;
+  start timestamps matched. Parallel PCM supplied 29.95 seconds. However,
+  neither decoded AAC nor PCM showed meaningful signal activity: the source
+  was effectively silent. The original helper reported success on nonzero
+  codec noise. The helper now requires samples above its existing activity
+  threshold (32/32768); the new regression and recheck of this actual clip
+  correctly reject it as proof of source audio. Audible-source validation
+  remains open. Matching timestamps alone do not prove physical A/V sync.
+- A separate 20-second video-only test saved 429 frames with zero recorder
+  drops and no audio track. It decoded successfully. Both tests restored their
+  original video/audio settings and stopped only their own bounded recordings.
+- Three memory snapshots measured 1,934 / 1,900 / 1,801 microseconds. The first
+  two occurred during recording; frame counters advanced across each HTTP
+  request and frame age stayed 3-8 ms. Internal free memory was 83,623-86,835
+  bytes. This short check is not endurance or worst-case snapshot evidence.
+- Updated the command-line video probe for the one-byte ACK advertisement,
+  negotiated ACK replies, short-message validation and explicit HTTP origins.
+  A 12-second H.264 run negotiated ACKs and yielded 15 decodable frames, all
+  IDRs, at roughly 1.2 fps. This is a **performance investigation still open**,
+  not a successful latency/throughput acceptance result. A static source and
+  recovery/backpressure behavior need to be distinguished on a moving source.
+- Seven recording-check host tests passed. Captures and raw reports stay local
+  under `/tmp/espkvm-adapt-sd-validation-01`,
+  `/tmp/espkvm-adapt-video-only-01`, `/tmp/espkvm-adapt-memory-samples.json` and
+  `/tmp/espkvm-adapt-probe.h264`; no captured media is committed.
+
+HTTPS browser behavior, meaningful source audio, repeated HDMI transitions,
+VPN direct/relay recovery, live upload fallback and final dependency publication
+remain acceptance work. No overall five-area completion is claimed.
+
 ## Video adaptation progress (2026-10-16)
 
 This implementation update follows the reconciliation above; it does not mark
