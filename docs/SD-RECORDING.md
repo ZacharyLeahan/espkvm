@@ -43,6 +43,13 @@ Live video averaged 4.2 fps; network audio captured 596.760 seconds of PCM over
 600.017 seconds, so streaming continuity still needs work even though the saved
 recording passed. See the [extended test evidence and limits](UPSTREAM-REVIEW.md#ten-minute-combined-streamingrecording-test-2026-10-17).
 
+A later ten-minute repeat also passed strict video/audio decoding: 5,395 video
+frames, 600.043 s of AAC and zero recorder-reported drops. Live transport still
+had 2.005 s of measured PCM gaps and one video disconnect. An experimental
+120 ms live-audio queue did not resolve the stalls and was reverted; the
+recorder queue was unchanged. See the [delivery diagnosis](UPSTREAM-REVIEW.md#live-pcm-queue-diagnosis-2026-10-17)
+for the failed experiment and retained diagnostics.
+
 ## H.264 cache correction (2026-10-17)
 
 The reliability branch now flushes CPU-edited SPS/keyframe data before the
@@ -128,12 +135,15 @@ python3 tools/check_sd_audio.py http://esp.local --seconds 8 --output-dir ignore
 python3 tools/check_sd_audio.py http://esp.local --seconds 60 --output-dir ignore/sd-check-60s
 python3 tools/check_sd_audio.py http://esp.local --seconds 600 --output-dir ignore/sd-check-10min
 python3 tools/check_sd_audio.py http://esp.local --seconds 8 --video-only --output-dir ignore/sd-check-video-only
+# Add --h264-kbps 1000 for a lower-bitrate comparison (default: 4000).
 # Add --no-network-audio to test SD alone or leave an existing listener alone.
 # Authenticated HTTPS: --cookies cookies.txt --ca espkvm-ca.pem
 ```
 
 Recording and PCM observation tools accept up to 600 seconds; downloads remain
-bounded to 512 MiB. For a live-video load, start `tools/video_probe.mjs` after
+bounded to 512 MiB. `--h264-kbps` accepts 500..20000; the helper verifies the
+applied settings and restores the previous bitrate after the trial. Requested
+and applied video settings are retained in `result.json`. For a live-video load, start `tools/video_probe.mjs` after
 the helper reports the recording path, with a duration that ends before the
 recording does. Do not operate the recorder concurrently.
 

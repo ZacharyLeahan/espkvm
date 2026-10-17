@@ -66,6 +66,13 @@ bumps the patch).
 
 ### Added
 
+- Allow bounded SD/audio checks at a selected H.264 bitrate, verify applied
+  settings, and restore the original bitrate after each comparison.
+
+- Diagnose live PCM delivery with bounded progress/end logs for sample gaps,
+  queue drops, startup, send stalls and block age. Separate successful writes
+  from final client-close failures; retain the existing low-latency queue.
+
 - Include optional AAC-LC stereo audio in microSD TS recordings and preserve it
   in MP4 clip conversion. Share HDMI capture across independent recorder/browser
   queues, preserve timing through dropped PCM with silence, and expose recording

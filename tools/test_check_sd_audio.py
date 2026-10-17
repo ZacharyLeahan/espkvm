@@ -38,6 +38,14 @@ class AudioCheckTests(unittest.TestCase):
         with self.assertRaises(check.CheckFailed):
             check.restore_settings(device, {'wifi_password': 'private'})
 
+    def test_invalid_bitrate_does_not_touch_device(self):
+        for bitrate in ('499', '20001'):
+            with patch.object(check, 'Device') as device, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    check.main(['http://example.test', '--output-dir', '/tmp/unused-audio-test',
+                                '--h264-kbps', bitrate])
+                device.assert_not_called()
+
     def test_pcm_validation_and_levels(self):
         levels = check.decoded_levels(struct.pack('<ffff', 0, .5, -1, 0), 2)
         self.assertEqual(levels['frames'], 2)
@@ -103,7 +111,7 @@ class AudioCheckTests(unittest.TestCase):
                 return {'vid_codec': 0, 'vid_fps_max': 6, 'h264_kbps': 1200,
                         'aud_enable': True, 'wifi_password': 'NEVER-PRINT-THIS'}
         device = Device()
-        args = argparse.Namespace(seconds=8, expect_audio=True, video_only=False,
+        args = argparse.Namespace(seconds=8, h264_kbps=1000, expect_audio=True, video_only=False,
                                   no_network_audio=True, output_dir=None)
         with tempfile.TemporaryDirectory() as temp:
             captured = io.StringIO()
@@ -112,6 +120,8 @@ class AudioCheckTests(unittest.TestCase):
                 self.assertEqual(check.check(args), 1)
             report = json.loads((Path(temp) / 'result.json').read_text())
             self.assertTrue(report['settings_restored'])
+            self.assertEqual(device.puts[0]['h264_kbps'], 1000)
+            self.assertEqual(device.puts[-1]['h264_kbps'], 1200)
             self.assertEqual(set(device.puts[-1]), set(check.VIDEO_SETTINGS))
             self.assertNotIn('NEVER-PRINT-THIS', captured.getvalue())
             self.assertNotIn('this diagnostic may contain secrets', captured.getvalue())
