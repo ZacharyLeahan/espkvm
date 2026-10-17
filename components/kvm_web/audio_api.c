@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #if CONFIG_KVM_ENABLE_AUDIO
 #include "esp_heap_caps.h"
+#include "esp_log.h"
+#include <inttypes.h>
 #include "lwip/sockets.h"
 #include "lwip/tcp.h"
 
@@ -21,6 +23,7 @@ typedef struct {
     httpd_req_t *req;
     kvm_audio_subscription_t *sub;
     kvm_auth_session_ref_t session;
+    int64_t started_us;
 } stream_context_t;
 
 static bool send_all(httpd_req_t *req, const char *data, size_t size)
@@ -51,21 +54,63 @@ static void stream_task(void *arg)
         "Cache-Control: no-store\r\nConnection: close\r\n"
         "X-Audio-Rate: %lu\r\nX-Audio-Format: s16le-stereo\r\n\r\n", (unsigned long)kvm_audio_rate());
     bool sent = false;
+    uint64_t sent_frames = 0, gap_frames = 0, next_frame = 0;
+    uint32_t epoch = 0, resets = 0, slow_sends = 0;
+    bool have_frame = false;
+    int64_t first_us = 0, max_send_us = 0, max_age_us = 0, max_ok_send_us = 0;
+    int64_t report_us = ctx->started_us;
+    const char *ended = "disabled_or_session";
     while (block && kvm_cap_active(KVM_CAP_AUDIO) && kvm_auth_session_ok(&ctx->session)) {
         esp_err_t error = kvm_audio_read(ctx->sub, block, 600);
-        if (error != ESP_OK) break;
+        if (error != ESP_OK) { ended = "capture_read"; break; }
         // Recheck after waiting, before sending even the first PCM block.
         if (!kvm_cap_active(KVM_CAP_AUDIO) || !kvm_auth_session_ok(&ctx->session)) break;
+        const int64_t now = esp_timer_get_time();
+        if (!first_us) first_us = now;
+        const int64_t age = now - block->start_us;
+        if (age > max_age_us) max_age_us = age;
         if (!sent) {
             // Once a custom header starts, never append a second HTTP response.
             sent = true;
-            if (!send_all(req, headers, header_size)) break;
+            if (!send_all(req, headers, header_size)) { ended = "header_send"; break; }
         }
-        if (!send_all(req, (const char *)block->pcm,
-                      block->frames * KVM_AUDIO_CHANNELS * sizeof(int16_t))) break;
+        const int64_t sending = esp_timer_get_time();
+        const bool ok = send_all(req, (const char *)block->pcm,
+                                 block->frames * KVM_AUDIO_CHANNELS * sizeof(int16_t));
+        const int64_t send_us = esp_timer_get_time() - sending;
+        if (send_us > max_send_us) max_send_us = send_us;
+        if (send_us > 5000) slow_sends++;
+        if (!ok) { ended = "pcm_send"; break; }
+        if (send_us > max_ok_send_us) max_ok_send_us = send_us;
+        if (have_frame) {
+            if (epoch != block->epoch) resets++;
+            else if (block->frame_index > next_frame) gap_frames += block->frame_index - next_frame;
+        }
+        have_frame = true;
+        epoch = block->epoch;
+        next_frame = block->frame_index + block->frames;
+        sent_frames += block->frames;
+        if (esp_timer_get_time() - report_us >= 30000000) {
+            ESP_LOGI("audio_stream", "progress sent=%" PRIu64 " gaps=%" PRIu64
+                     " max_ok_send_us=%" PRId64, sent_frames, gap_frames, max_ok_send_us);
+            report_us = esp_timer_get_time();
+        }
         // Backpressure affects only this subscriber's bounded queue. The shared
         // I2S producer and SD recorder continue even if this socket times out.
     }
+    kvm_audio_subscription_stats_t stats;
+    kvm_audio_subscription_stats(ctx->sub, &stats);
+    // Keep each line within the retained log's 160-byte limit. Never log PCM,
+    // cookies or source text; these counters describe transport only.
+    ESP_LOGI("audio_stream", "end=%s sent=%" PRIu64 " read=%" PRIu64,
+             ended, sent_frames, stats.received_frames);
+    ESP_LOGI("audio_stream", "queue_drop=%" PRIu64 " gaps=%" PRIu64 " epochs=%" PRIu32,
+             stats.dropped_frames, gap_frames, resets);
+    ESP_LOGI("audio_stream", "startup_us=%" PRId64 " max_send_us=%" PRId64
+             " slow_sends=%" PRIu32 " max_age_us=%" PRId64,
+             first_us ? first_us - ctx->started_us : -1,
+             max_send_us, slow_sends, max_age_us);
+    ESP_LOGI("audio_stream", "max_ok_send_us=%" PRId64, max_ok_send_us);
     kvm_audio_unsubscribe(ctx->sub);
     heap_caps_free(block);
     if (!sent) {
@@ -140,6 +185,7 @@ static esp_err_t audio_stream(httpd_req_t *req)
         return httpd_resp_sendstr(req, esp_err_to_name(err));
     }
     ctx->session = session;
+    ctx->started_us = esp_timer_get_time();
     err = httpd_req_async_handler_begin(req, &ctx->req);
     if (err == ESP_OK) {
         if (xTaskCreate(stream_task, "hdmi_audio", 6144, ctx, 6, NULL) == pdPASS) return ESP_OK;
