@@ -243,6 +243,28 @@ and integrated VPN validation remain outstanding.
   freshness fields, confirming the new build has not been flashed. This is
   reachability evidence only, not verification of this adaptation.
 
+## Source-copy build verification (2026-10-16)
+
+Implementation: [daffe2c](https://github.com/ZacharyLeahan/espkvm-xbox/commit/daffe2c2f4872db3b61aa3be9a4163f4741d0541), adapting the explicit component-path subset of
+`09e7920`. This completes that source-path adaptation; release packaging and
+unrelated board/documentation portions remain omitted.
+
+A temporary source copy was populated from firmware, console and Microlink Git
+archives, omitting symlinks. The changed top-level CMake file was copied in,
+verified managed dependency packages were copied to avoid redownloading, and a
+private audio-enabled profile was used only in the temporary directory. The
+Microlink `components/wireguard_lwip` symlink was confirmed absent. A full
+`idf.py build` succeeded from that source copy with real nested component paths.
+The regular checkout audio-enabled build had also passed with those paths.
+Known Microlink unused-symbol warnings appeared in the full build; no new
+warning sites were observed. This validates component discovery, not a published
+release archive, rebuilt console bundle or installed device image.
+
+Task-memory snapshot work remains open. Local IDF source confirms scheduler
+suspension is per-core; retaining TCB/name pointers across an unlocked interval
+needs an explicit lifetime solution before adapting upstream's task table.
+No device firmware, C6 or SD contents were changed during this verification.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
