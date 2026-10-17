@@ -204,25 +204,41 @@ static void stop_tunnel(void)
     }
 }
 
+/* Allocate the worker only on first enable. Serialize creation because an IP
+ * event and a settings write may both request it; neither may create a second
+ * worker against the same tunnel. Once created it sleeps when disabled. */
+static esp_err_t start_task(void)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    esp_err_t err = ESP_OK;
+    if (!s_task && xTaskCreate(wg_task, "kvm_wg", 8192, NULL, 5, &s_task) != pdPASS) {
+        s_task = NULL;
+        err = ESP_ERR_NO_MEM;
+    }
+    xSemaphoreGive(s_mtx);
+    return err;
+}
+
 esp_err_t kvm_wg_init(void)
 {
-    if (s_task) {
-        return ESP_OK;
+    /* Called during boot before the settings service accepts requests. */
+    if (s_mtx) {
+        return kvm_wg_apply();
     }
     s_mtx = xSemaphoreCreateMutex();
     s_apply_sem = xSemaphoreCreateBinary();
     if (!s_mtx || !s_apply_sem) {
+        if (s_mtx) vSemaphoreDelete(s_mtx);
+        if (s_apply_sem) vSemaphoreDelete(s_apply_sem);
+        s_mtx = NULL;
+        s_apply_sem = NULL;
         return ESP_ERR_NO_MEM;
     }
     esp_err_t ev = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL);
     if (ev != ESP_OK) {
         ESP_LOGW(TAG, "could not watch for GOT_IP: %s", esp_err_to_name(ev));
     }
-    if (xTaskCreate(wg_task, "kvm_wg", 8192, NULL, 5, &s_task) != pdPASS) {
-        s_task = NULL;
-        return ESP_ERR_NO_MEM;
-    }
-    return ESP_OK;
+    return kvm_wg_apply();
 }
 
 /* Resolve "host" (a name or a literal address) to an IPv4 ip_addr_t. */
@@ -466,6 +482,10 @@ esp_err_t kvm_wg_apply(void)
 {
     if (!s_apply_sem) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (kvm_setting_bool("wg_enable")) {
+        const esp_err_t err = start_task();
+        if (err != ESP_OK) return err;
     }
     xSemaphoreGive(s_apply_sem);
     return ESP_OK;

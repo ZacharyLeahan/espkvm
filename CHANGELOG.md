@@ -9,6 +9,11 @@ bumps the patch).
 
 ### Fixed
 
+- Allow microSD image uploads to use smaller or fewer PSRAM buffers when memory
+  is fragmented, retaining the refusal to upload during recording.
+- Allocate the classic WireGuard worker only on first enable; concurrent enable
+  requests share one worker and allocation failures can be retried.
+
 - Add H.264 SPS no-reorder signaling on both encoder paths, with bounded
   rewriting that preserves access units when there is no room or the parameter
   set is unsupported. Recording bitrate policy is unchanged.

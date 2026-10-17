@@ -1506,6 +1506,7 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
  */
 #define UPLOAD_CHUNK (256 * 1024)
 #define UPLOAD_BUFS 4
+#define UPLOAD_CHUNK_MIN (32 * 1024)
 #define UPLOAD_WRITER_STACK (4 * 1024)
 
 typedef struct {
@@ -1528,6 +1529,32 @@ typedef struct {
     volatile bool failed;
     int64_t write_us;
 } upload_writer_t;
+
+/* Prefer pipelining, but keep uploads usable when capture fragments PSRAM.
+ * Every queued buffer has the same capacity; failed larger attempts are freed
+ * before retrying. The caller owns and drains the returned buffers on all exits. */
+static int upload_buffers_alloc(upload_writer_t *w, size_t *chunk)
+{
+    *chunk = UPLOAD_CHUNK;
+    int count = 0;
+    while (count < UPLOAD_BUFS) {
+        upload_buf_t b = {.data = heap_caps_aligned_alloc(64, *chunk, MALLOC_CAP_SPIRAM)};
+        if (b.data) {
+            if (xQueueSend(w->empty, &b, 0) != pdTRUE) {
+                free(b.data);
+                break;
+            }
+            count++;
+        } else if (count < 2 && *chunk > UPLOAD_CHUNK_MIN) {
+            while (xQueueReceive(w->empty, &b, 0) == pdTRUE) free(b.data);
+            count = 0;
+            *chunk /= 2;
+        } else {
+            break;
+        }
+    }
+    return count;
+}
 
 static void upload_writer_task(void *arg)
 {
@@ -1590,12 +1617,13 @@ static void upload_worker_task(void *arg)
     w.empty = xQueueCreate(UPLOAD_BUFS, sizeof(upload_buf_t));
     w.done = xSemaphoreCreateBinary();
     ok = w.full && w.empty && w.done;
-    for (int i = 0; ok && i < UPLOAD_BUFS; i++) {
-        upload_buf_t b = {.data = heap_caps_aligned_alloc(64, UPLOAD_CHUNK, MALLOC_CAP_SPIRAM)};
-        ok = b.data != NULL;
-        if (ok) {
-            xQueueSend(w.empty, &b, 0);
-        }
+    size_t chunk = UPLOAD_CHUNK;
+    const int buffers = ok ? upload_buffers_alloc(&w, &chunk) : 0;
+    ok = ok && buffers > 0;
+    if (ok && (chunk != UPLOAD_CHUNK || buffers != UPLOAD_BUFS)) {
+        ESP_LOGW(TAG, "upload: %d buffers of %u KB (PSRAM largest %u KB)", buffers,
+                 (unsigned)(chunk / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
     }
     const bool writer = ok && xTaskCreate(upload_writer_task, "kvm_upload_wr", UPLOAD_WRITER_STACK,
                                           &w, UPLOAD_WORKER_PRIO, NULL) == pdPASS;
@@ -1610,8 +1638,8 @@ static void upload_worker_task(void *arg)
         b.len = 0; /* it comes back holding the length it was written with */
         /* Fill the buffer, or take whatever arrived before a lull. recv hands
          * back a TLS record at a time; batching them makes a few large writes. */
-        while (b.len < UPLOAD_CHUNK && received + b.len < ctx->content_len) {
-            const size_t room = UPLOAD_CHUNK - b.len;
+        while (b.len < chunk && received + b.len < ctx->content_len) {
+            const size_t room = chunk - b.len;
             const size_t left = ctx->content_len - received - b.len;
             const int n = httpd_req_recv(req, b.data + b.len, room < left ? room : left);
             if (kvm_recv_stalled(n)) {
