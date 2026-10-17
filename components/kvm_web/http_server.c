@@ -47,6 +47,10 @@
 #include "esp_netif.h"
 
 #include "lwip/sockets.h"
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+#include "lwip/priv/tcp_priv.h"
+#include "lwip/tcpip.h"
+#endif
 
 #include "cJSON.h"
 
@@ -2753,6 +2757,67 @@ static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_
     return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
 }
 
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+typedef struct {
+    uint32_t free_bytes, window, ack, next, queued_bytes, cwnd;
+    unsigned queue, unacked, unsent, retransmits, found;
+    int64_t lock_us;
+} tx_probe_t;
+
+static tx_probe_t tx_probe(int fd)
+{
+    tx_probe_t out = {0};
+    struct sockaddr_storage local = {0}, peer = {0};
+    socklen_t len = sizeof(local);
+    if (getsockname(fd, (struct sockaddr *)&local, &len)) return out;
+    len = sizeof(peer);
+    if (getpeername(fd, (struct sockaddr *)&peer, &len)) return out;
+    uint16_t local_port, peer_port;
+    uint32_t local_addr, peer_addr;
+    if (local.ss_family == AF_INET && peer.ss_family == AF_INET) {
+        const struct sockaddr_in *l = (const struct sockaddr_in *)&local;
+        const struct sockaddr_in *r = (const struct sockaddr_in *)&peer;
+        local_port = ntohs(l->sin_port); peer_port = ntohs(r->sin_port);
+        local_addr = l->sin_addr.s_addr; peer_addr = r->sin_addr.s_addr;
+    } else if (local.ss_family == AF_INET6 && peer.ss_family == AF_INET6) {
+        const struct sockaddr_in6 *l = (const struct sockaddr_in6 *)&local;
+        const struct sockaddr_in6 *r = (const struct sockaddr_in6 *)&peer;
+        if (!IN6_IS_ADDR_V4MAPPED(&l->sin6_addr) || !IN6_IS_ADDR_V4MAPPED(&r->sin6_addr)) return out;
+        local_port = ntohs(l->sin6_port); peer_port = ntohs(r->sin6_port);
+        memcpy(&local_addr, &l->sin6_addr.s6_addr[12], sizeof(local_addr));
+        memcpy(&peer_addr, &r->sin6_addr.s6_addr[12], sizeof(peer_addr));
+    } else return out;
+    const int64_t start = esp_timer_get_time();
+    LOCK_TCPIP_CORE();
+    out.lock_us = esp_timer_get_time() - start;
+    /* Walk under the core lock instead of retaining a socket's private PCB
+     * pointer across asynchronous close/reuse. Match the full IPv4 tuple. */
+    for (struct tcp_pcb *pcb = tcp_active_pcbs; pcb; pcb = pcb->next) {
+        if (!IP_IS_V4(&pcb->local_ip) || !IP_IS_V4(&pcb->remote_ip) ||
+            pcb->local_port != local_port || pcb->remote_port != peer_port ||
+            ip4_addr_get_u32(ip_2_ip4(&pcb->local_ip)) != local_addr ||
+            ip4_addr_get_u32(ip_2_ip4(&pcb->remote_ip)) != peer_addr) continue;
+        out.found = 1; out.free_bytes = pcb->snd_buf; out.queue = pcb->snd_queuelen;
+        out.window = pcb->snd_wnd; out.ack = pcb->lastack; out.next = pcb->snd_nxt;
+        out.queued_bytes = pcb->snd_lbb - pcb->lastack; out.cwnd = pcb->cwnd;
+        out.retransmits = pcb->nrtx;
+        for (struct tcp_seg *seg = pcb->unacked; seg; seg = seg->next) out.unacked++;
+        for (struct tcp_seg *seg = pcb->unsent; seg; seg = seg->next) out.unsent++;
+        break;
+    }
+    UNLOCK_TCPIP_CORE();
+    return out;
+}
+
+static void tx_probe_log(const char *phase, int fd, const tx_probe_t *p)
+{
+    ESP_LOGI("tx_probe", "%s fd=%d found=%u free=%"PRIu32" q=%u ua=%u us=%u win=%"PRIu32,
+             phase, fd, p->found, p->free_bytes, p->queue, p->unacked, p->unsent, p->window);
+    ESP_LOGI("tx_probe", "%s ack=%"PRIu32" next=%"PRIu32" queued=%"PRIu32" cwnd=%"PRIu32" rtx=%u lock_us=%"PRId64,
+             phase, p->ack, p->next, p->queued_bytes, p->cwnd, p->retransmits, p->lock_us);
+}
+#endif
+
 /* IDF's WebSocket sender accepts any nonnegative send result as a full
  * header/payload write. Plain HTTP needs the same complete-write guarantee
  * as TLS, or the next frame can start inside an unfinished payload. */
@@ -2772,19 +2837,51 @@ static int locked_http_send(httpd_handle_t hd, int sockfd, const char *buf, size
         if (configured > 0 && configured < budget) budget = configured;
     }
     const int64_t deadline = esp_timer_get_time() + budget;
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+    const bool probe_on = budget == 250000;
+    const int64_t probe_start = esp_timer_get_time();
+    int64_t max_call = 0, max_yield = 0;
+    unsigned retries = 0;
+    tx_probe_t first = {0};
+#endif
     size_t done = 0;
     int failure_errno = 0;
     while (done < buf_len && esp_timer_get_time() < deadline) {
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+        const int64_t call_start = esp_timer_get_time();
+#endif
         const ssize_t ret = send(sockfd, buf + done, buf_len - done, flags | MSG_DONTWAIT);
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+        const int64_t call_us = esp_timer_get_time() - call_start;
+        if (call_us > max_call) max_call = call_us;
+#endif
         if (ret > 0 && (size_t)ret <= buf_len - done) {
             done += (size_t)ret;
         } else if (ret < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+            if (probe_on && retries++ == 0) first = tx_probe(sockfd);
+            const int64_t yield_start = esp_timer_get_time();
+#endif
             vTaskDelay(1);
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+            const int64_t yield_us = esp_timer_get_time() - yield_start;
+            if (yield_us > max_yield) max_yield = yield_us;
+#endif
         } else {
             failure_errno = ret < 0 ? errno : 0;
             break;
         }
     }
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS
+    const int64_t elapsed = esp_timer_get_time() - probe_start;
+    if (probe_on && elapsed >= 50000) {
+        const tx_probe_t last = tx_probe(sockfd);
+        ESP_LOGI("tx_probe", "fd=%d bytes=%u/%u us=%"PRId64" retry=%u call=%"PRId64" yield=%"PRId64,
+                 sockfd, (unsigned)done, (unsigned)buf_len, elapsed, retries, max_call, max_yield);
+        tx_probe_log("first", sockfd, &first);
+        tx_probe_log("last", sockfd, &last);
+    }
+#endif
     if (done != buf_len) {
         if (esp_timer_get_time() >= deadline) failure_errno = ETIMEDOUT;
         shutdown(sockfd, SHUT_RDWR);

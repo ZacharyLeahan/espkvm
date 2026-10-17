@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Diagnostics
 
+- Add default-off TCP queue and retry timing diagnostics for stalled HTTP PCM
+  sends, including IPv4-mapped socket matching.
+
 - Add opt-in PCM sender task-state sampling with separate successful-write and
   disconnect counts; leave it disabled by default to avoid playback overhead.
 

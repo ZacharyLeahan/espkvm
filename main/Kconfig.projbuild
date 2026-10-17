@@ -104,6 +104,16 @@ menu "ESP-KVM"
                 These coarse samples cannot distinguish running from ready
                 time and can perturb scheduling. Leave off for normal use.
 
+        config KVM_HTTP_TX_DIAGNOSTICS
+            bool "Trace stalled HTTP audio sends (diagnostic)"
+            depends on KVM_ENABLE_AUDIO && LWIP_TCPIP_CORE_LOCKING
+            default n
+            help
+                Sample TCP buffer/ACK state on stalled PCM writes and log
+                retry timing for writes taking at least 50 ms. Uses lwIP
+                private PCB definitions under the core lock. Can perturb
+                timing; leave disabled for normal operation.
+
         config KVM_ENABLE_DISPLAY
             bool "Status display (I2C OLED / round SPI LCD)"
             default y

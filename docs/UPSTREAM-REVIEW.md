@@ -113,6 +113,75 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## TCP queue and path correlation (2026-10-17)
+
+The default-off `CONFIG_KVM_HTTP_TX_DIAGNOSTICS` option samples stalled plain
+HTTP PCM sends. It records free TCP send bytes, queued/unacknowledged/unsent
+segments, advertised window, last acknowledged/next sequence, congestion window,
+retransmit state, explicit core-lock acquisition time, retry count, longest
+socket call and scheduler yield. PCB traversal uses the lwIP core lock and the
+full IPv4 tuple, including IPv4-mapped IPv6 socket addresses. Native IPv6 and
+TLS are not covered. It retains no PCB pointer across sampling calls.
+No media, queue, timeout, endpoint or authentication policy changes in this step.
+
+Measured on Function EV / C790, 48 kHz stereo PCM, Wi-Fi, without a video viewer
+or SD recording during these isolated runs:
+
+- The first 150-second diagnostic trial delivered 149.165 seconds. Its initial
+  IPv4-only socket probe returned `found=0` on the dual-stack server, so its TCP
+  state fields are invalid evidence. The sampler was corrected and retested.
+- The corrected 150-second run delivered 149.070 seconds in 150.005 seconds;
+  confirmed producer gaps were 43,920 frames (915 ms), with maximum successful
+  send 170.447 ms. Representative stall snapshots showed **zero free send
+  bytes, 8,192 bytes queued, 9-12 unacknowledged segments, no unsent segments,
+  and a 65,535-byte peer window**. The 169.060 ms write retried 17 times,
+  with maximum socket-call duration 432 us and yield 9.950 ms; explicit core
+  lock acquisition took 2 us. Its next snapshot showed ACK progress and free
+  space, allowing completion. This rules against a single long socket call or
+  gross sender-task starvation in that captured stall, not every possible stall.
+- The corresponding receiver trace showed a 171.914 ms data-arrival gap.
+  The Mac emitted the ACK for the preceding packet after 67 us; the ESP's
+  snapshot still considered its send buffer unacknowledged. Receiver capture
+  timestamps are host-stack timestamps, not proof of over-the-air delivery.
+  Two stall clusters occurred about 60 seconds apart. There were 29,856 data
+  packets, no repeated/out-of-order sequence ranges in this receiver capture,
+  and no kernel capture drops. This does not rule out loss on the reverse path.
+- A further 150-second run added five pings/second to the gateway and ESP.
+  PCM delivered 149.270 seconds in 150.005 seconds, with 33,360 confirmed gap
+  frames (695 ms), maximum successful send 216.032 ms, and maximum packet
+  arrival gap 259.168 ms. Across 736 timed replies per destination, gateway
+  RTT peaked at 28.087 ms while ESP RTT peaked at 270.939 ms during the audio
+  stall cluster. Pings did not eliminate the stalls. This points away from a
+  general Mac-to-router outage and toward the AP-to-ESP/C6/SDIO receive path;
+  it does not identify which part is responsible. Probe traffic can perturb
+  timing, so this is not a controlled performance improvement claim.
+
+Both corrected audio observers completed their requested durations; final send
+failures occurred at client shutdown and are not counted as premature failures.
+No recorder regression test or successful endurance acceptance is claimed for
+these diagnostic runs. Existing TX/pacing host tests passed. Enabled and disabled
+app builds were checked; full rebuilds expose existing unused-variable/function
+warnings in Microlink, with no new diagnostic-code warnings.
+
+Evidence stays local in `/tmp/espkvm-txprobe-01`, `/tmp/espkvm-txprobe-02`, and
+`/tmp/espkvm-txprobe-path`. No raw media or packet summaries are published.
+For reproduction, enable the diagnostic option, run `tools/observe_audio.py`
+for 150 seconds with a new local WAV path, and poll `/api/v1/system/log` every
+2 seconds, retaining only `tx_probe`, `audio_stream` and `http_tx` entries with
+host timestamps. The ring is small; an end-only log fetch misses evidence.
+Correlate sequence numbers with a local device-filtered TCP header capture.
+Use trusted TLS/cookies where configured; do not disable authentication for tests.
+Turn diagnostics off again for normal use.
+
+**Decision:** keep PR #7 draft. Do not increase queue/deadline defaults based on
+this evidence. The next measurement should compare C6/SDIO received-packet and
+stack-delivery counters during a stall, and confirm the radio power-save state.
+ESP-Hosted exposes optional host packet counters, but they were not enabled or
+validated here. Its receive-loop review did not establish a matching periodic
+sleep or a proven code defect. A radio/receive-path fix needs that next boundary
+measurement or an alternate-network comparison before another combined
+video/PCM/microSD acceptance run is meaningful.
+
 ## Nonblocking HTTP deadline experiment (2026-10-17)
 
 Implementation and evidence: [456d090](https://github.com/ZacharyLeahan/espkvm-xbox/commit/456d090).

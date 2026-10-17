@@ -271,3 +271,14 @@ Neither count proves Wi-Fi loss or isolates a specific scheduler bottleneck.
 The observer stops before its sender context is released. Allocation failure
 logs unavailability and leaves PCM streaming usable. Disable sampling again
 for normal playback and latency measurements.
+
+### Optional TCP stall diagnostics
+
+`CONFIG_KVM_HTTP_TX_DIAGNOSTICS` defaults off. When enabled, plain HTTP PCM
+writes taking at least 50 ms log retry timing and TCP queue/ACK snapshots.
+The sampler supports IPv4 and IPv4-mapped sockets, uses lwIP private PCB
+definitions under its core lock, and can perturb timing. `found=0` means no
+valid TCP snapshot; do not interpret its zero fields as an empty queue.
+Poll device logs during a bounded observation; the ring cannot retain a long
+run. Disable the option again for normal playback. See the upstream review
+ledger for measured stalls and remaining network-path uncertainty.
