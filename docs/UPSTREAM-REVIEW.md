@@ -48,40 +48,57 @@ submodule just to update this ledger; those are separate implementation steps.
 - This reconciliation fetched history and inspected source/dependency diffs. New **Pending** recommendations are not approval to integrate. No firmware, console bundle, dependency pin, device setting or installed image was changed; no new hardware/performance validation is claimed.
 - The inventory tip marks what we listed, not what we adopted or fully reviewed.
 
-## Follow-up reconciliation (2026-10-16)
+## Current reconciliation (2026-10-16)
 
-Fetched all three upstream remotes again without merging. Firmware remains
-`4c626628b8f7fdf225edc168ca6a1d3d423c2fa5`, console remains
-`48c58b037ac90504db677e83f03fa731b41bb664`, and Microlink `idf6` remains
-`5129dc2735419ec54b74a95d48193ff862f29338`. **No new upstream commits** were
-found beyond the inventory above. The inventory counts and pins above describe
-its original baseline, not the current working tree.
+Fetched firmware `upstream/main`, console `upstream/main` and Microlink
+`upstream/idf6` again. Their tips remain `4c62662`, `48c58b0` and `5129dc2`
+respectively: **no new upstream commits since the inventory checkpoint**.
+Reviewed local firmware through `958fa09`, console through `a258024` and
+Microlink through `d3210a0`. The checkpoint above describes the original
+baseline; the table below is the current implementation status. Historical
+inventory decisions farther down retain the original rationale and source URLs.
 
-The local `upstream-reliability-xbox` branches now contain implementation work.
-This status table supersedes older "Pending" / "Not implemented" statements
-for these specific subsets. Local commit links are provenance references;
-publication, parent dependency pins and device installation are not established
-by this reconciliation.
-
-| Subset | Current local state | Remaining acceptance work |
+| Area | Current implementation | Remaining acceptance work |
 | --- | --- | --- |
-| `48c22d3`: bounded bridge I2C, failed timing reads and unsupported boot modes | Adapted in firmware [8d94230](https://github.com/ZacharyLeahan/espkvm-xbox/commit/8d942304e8631b0ca37bf34e76d7e7e5fab61979). Preserves corrected HDMI audio registers and PLL restoration. | Prior implementation checks: 82 injected failure/recovery cases and audio-enabled build passed. Repeated physical reconnects, oversized-to-supported mode recovery and concurrent SD audio remain to verify. |
-| Console `2b6907c`, `e585e98`, `863429f`: initial settings section, grouping, safe drafts and card wording | Adapted in console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07). Saves are serialized and newer/failed drafts survive. Parent pin is not yet advanced. | Prior implementation checks: typecheck, 74 console tests and production build passed. Integrated browser/device validation remains. |
-| Microlink receive queue, endpoint validation, handshake time, TLS cleanup, core locks and framed JSON | Six local cherry-picks: [56e232d](https://github.com/ZacharyLeahan/microlink/commit/56e232d80f50ec34c9a680374ba3db737fb2c2e6), [b3bbe2f](https://github.com/ZacharyLeahan/microlink/commit/b3bbe2f02ca1f78e6ceb812fa8d9936728ecf213), [ccf5b19](https://github.com/ZacharyLeahan/microlink/commit/ccf5b196a19c594878b16bbf30c02d9f09a26e75), [5adc0f4](https://github.com/ZacharyLeahan/microlink/commit/5adc0f4594de8d8dd1de2b2618c2c46068d6157d), [dde0837](https://github.com/ZacharyLeahan/microlink/commit/dde08378148bae2597a5679b15d61c6ad3acc3a4), [d9b6eca](https://github.com/ZacharyLeahan/microlink/commit/d9b6ecaaa79dfa3275722bc1eca62a378d4beab1). Each retains its upstream source trailer. | Parent pin, integrated build and direct/relay/reboot/failure tests remain. These commits do not establish VPN reliability on the device. |
-| `e14b7ca` SPS and Microlink `5129dc2` reconnect/path changes | Partial, uncommitted working-tree adaptations. | Review, integration and validation remain; neither is treated as shipped. |
-| Server/browser transport, upload allocation fallback, memory/freshness diagnostics, lazy WireGuard and explicit CMake paths | Still outstanding. | Retain the adaptation boundaries and acceptance gates below. |
+| HDMI bridge recovery | Adapted in [8d94230](https://github.com/ZacharyLeahan/espkvm-xbox/commit/8d942304e8631b0ca37bf34e76d7e7e5fab61979): bounded I2C, failed reads and capped boot recovery, preserving HDMI audio PLL corrections. | Host failure tests/build passed previously; physical reconnects and oversized-to-supported mode changes with SD audio remain unverified. |
+| Settings and build paths | Console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07); firmware [daffe2c](https://github.com/ZacharyLeahan/espkvm-xbox/commit/daffe2c2f4872db3b61aa3be9a4163f4741d0541). Safe drafts, grouping, initial section, card wording and explicit component paths are implemented. | Console tests/typecheck and source-copy build passed previously; integrated browser checks and parent console pin remain. |
+| Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks/build passed previously. HTTPS, slow viewers, simultaneous PCM/SD AAC and TS/MP4 compatibility need combined device validation. No measured latency improvement claimed. |
+| Microlink reliability | Six source-attributed cherry-picks plus reconnect/path adaptation [d3210a0](https://github.com/ZacharyLeahan/microlink/commit/d3210a0523766d6917706aa643750082f61d49f8); exact sources and boundaries are recorded below. | Host checks/build passed previously; direct/relay, peer reboot, clock sync, TLS failures and parent dependency pin remain. |
+| Memory and diagnostics | Upload fallback/lazy WireGuard [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67), freshness [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), heap/task endpoint [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04). | Host checks/build passed previously; measure snapshot pauses, upload behavior and memory under simultaneous video/audio/recording. API skill updated locally; upstream MCP remains an explicitly recorded access gap. |
 
-Recommended next work remains the five areas below: finish bridge validation,
-finish settings integration, adapt video delivery/decoder recovery, complete
-Microlink reliability, and adapt memory/diagnostic improvements. Keep shared
-AAC recording and browser PCM intact. Continue deferring automatic bitrate
-reductions that would lower recordings, broad stack reductions, persistent
-session policy changes, ACME and replacement gamepad implementations.
+These are local feature-branch implementations, not a completed upstream merge
+or a verified release. Parent pins still reference console `60c39f0` and
+Microlink `d6865e1`; dependency checkouts and the generated console bundle are
+modified. Publication is not established by this reconciliation. An application
+flash started during the earlier implementation work finished successfully
+(hash verified in its existing log); that is installation evidence only, not
+runtime acceptance. This ledger review initiated no additional flash or tests.
 
-This follow-up changed only this ledger. Existing source changes, generated
-console bundle, dependency checkouts and unrelated roadmap edits were preserved.
-No new hardware tests, merge, flash or push were performed. Prior implementation
-results above are historical evidence, not tests rerun during this review.
+### What is still worth adapting
+
+Finish and validate the five implemented areas before adding another broad
+batch. The remaining useful, previously inventoried candidates are:
+
+- **Authenticated live log tail** (`5180eaa`): useful for intermittent HDMI/audio
+  faults; first review bounded allocation, concurrency and private log content.
+- **Console cache refresh/recovery notice** (firmware `157a797`, console
+  `06e59ba`): helps avoid stale UI after an update; test offline fallback and
+  keep audio/API responses out of the cache.
+- **Return to sign-in on HTTP 401** (console `73ea97e`): review alongside our
+  audio cancellation/logout behavior before adapting.
+- **Capture-to-send timing diagnostics** (`e14b7ca`): useful after propagating
+  timestamps per encoding job; frame freshness is already implemented, but
+  latency instrumentation and physical A/V synchronization are not established.
+
+The 480p FIFO/EDID subset remains conditional: our RGB path does not demonstrate
+that upstream's UYVY threshold change would fix this installation. Keep adaptive
+bitrate, broad stack cuts, persisted-session policy, ACME, generic gamepad
+replacement and larger UDP mailbox settings deferred for the reasons below.
+No newly discovered upstream change requires immediate adoption.
+
+This reconciliation changes only the ledger and preserves unrelated roadmap,
+bundle and dependency working-tree changes. Historical tests below were not
+rerun for this documentation update.
 
 ## Video adaptation progress (2026-10-16)
 
@@ -315,7 +332,9 @@ diagnostics; integrated device validation remains open.
 
 ## New upstream inventory (2026-10-16)
 
-These rows cover every commit in `ce519cc..4c62662`. **Pending (recommended)**
+These historical inventory rows cover every commit in `ce519cc..4c62662`.
+The current reconciliation table above supersedes implementation statuses here.
+**Pending (recommended)**
 means worth adapting, with no implementation authorized by this reconciliation.
 Mixed releases are split where their tradeoffs differ. All implementation and
 hardware tests for these new subsets remain outstanding unless explicitly noted.
@@ -357,8 +376,9 @@ audio controls must survive any future adaptation.
 
 ## Console dependencies and small fixes
 
-All entries below are **Pending recommendations**, except the explicitly deferred
-certificate feature. Upstream has 20 console commits beyond our shared base
+At the original inventory, entries below were **Pending recommendations**;
+the current reconciliation table supersedes implemented subsets. The explicitly deferred
+certificate feature remains deferred. Upstream has 20 console commits beyond our shared base
 `16f9d8141383a4c6165df280080d7ea50acaa263`; its package manifest and lockfile match
 ours. This is not a reason to advance the whole submodule: upstream does not
 contain our PCM playback and recording-audio UI.
@@ -396,7 +416,7 @@ feature or copying task-stack reductions.
 | [f9122f2](https://github.com/espkvm/microlink/commit/f9122f2289feac67b73e83d842b74cc2da0ac50e) | Deferred: upstream stack reductions require measurements of this fork's failure and audio/recording paths. |
 | [bf2ac1e](https://github.com/espkvm/microlink/commit/bf2ac1eb0b17d9b17e6dc37d24209235cf2e6636) | Deferred: ACME/DNS support for firmware `c90457c`. Its DNS request can hold the Tailscale mutex for up to 60 seconds; assess responsiveness and TLS memory before adopting. |
 
-## Recommended implementation order and acceptance gates
+## Original implementation order and acceptance gates
 
 1. **Bridge recovery:** the `48c22d3` timeout/error-propagation subset. Preserve
    HDMI audio PLL recovery; prove reconnect and mode switching with the recorder.
