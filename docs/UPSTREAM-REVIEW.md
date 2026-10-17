@@ -113,6 +113,101 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## Plain HTTP complete-write handling (2026-10-17)
+
+Fork implementation: [3585933](https://github.com/ZacharyLeahan/espkvm-xbox/commit/3585933),
+revised by [f41eab0](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f41eab0).
+This is a focused correction to our transport wrapper, not a newly adopted
+upstream commit. IDF's WebSocket sender checks only negative send results;
+a short positive plain-HTTP write could otherwise advance framing too early.
+Plain HTTP now completes partial writes under the per-session lock and shuts
+down an incomplete connection on failure. TLS keeps its existing path.
+
+The socket's SO_SNDTIMEO remains in effect for each blocking call, including
+PCM's 100 ms setting. A separate five-second deadline bounds retries between
+calls; it is not a hard wall-clock cap on a blocking send or lock acquisition.
+EAGAIN/EWOULDBLOCK ends a stalled write without renewing its timeout; EINTR
+yields before retrying. Incomplete-write logs retain byte counts and errno,
+without payloads. No endpoint shape, authentication, queue or bitrate defaults
+were changed.
+
+**Rejected first iteration:** an overall budget equal to the short PCM socket
+timeout was too restrictive for partial completion. Its combined movie attempt
+lost the PCM connection after approximately 26 seconds (1,241,280 frames sent),
+with 105 ms confirmed gaps and a 141.516 ms final failed send. The exact failed
+return was not instrumented, so deadline expiry was not directly observed.
+The owned recording was stopped after about 177 seconds; the viewer was
+terminated deliberately before its requested duration. The recording helper
+correctly failed `Parallel network audio capture failed`, while its saved
+H.264/AAC tracks decoded. `VIDEO/up-000037.ts` had 45,845,680 bytes, zero recorder
+queue drops and 980 inserted silence frames. Settings were restored. This
+failed attempt remains local under `/tmp/espkvm-http-endurance-01/`.
+
+The revision preserves per-call timeout semantics and tests a short successful
+write that consumes 100 ms before the remaining bytes are sent. Host tests
+cover partial success/failure, zero return, EINTR, fatal errors, retry deadline,
+stale sessions and the existing TLS/session-lock behavior. Fragment pacing
+tests and the revised hardware-profile build passed without new warnings.
+
+**Revised smoke test:** a 60-second movie clip, `VIDEO/up-000044.ts`, passed
+strict video/AAC decoding with zero recorder queue drops and 280 inserted
+silence frames. Live PCM completed with 59.660 s received over 60.010 s wall
+time, 325 ms confirmed gaps, no epoch change and a 94.693 ms longest successful
+send. Its final incomplete-write log followed the observer's normal closure.
+The viewer completed 55.0 s with 517 frames, 9.4 fps, 1283 kbit/s, 39 keyframes
+and ACKs. The one-minute pass does not establish uninterrupted endurance or
+a causal explanation for the earlier malformed frame. Evidence is local under
+`/tmp/espkvm-http-smoke-02/`.
+
+### Revised ten-minute movie trial
+
+**Video duration and recorded-track decoding passed; uninterrupted live audio
+failed.** The same 720p/60 HDMI movie source, H.264 4000 kbit/s target, 30-fps
+cap, 40 ms PCM queue and 8192-byte TCP buffer were used. Sampling stayed off.
+The browser viewer was paused; one measured viewer ran for 570 seconds.
+
+- The original video connection completed all 570.0 s: 5,037 frames, 8.8 fps,
+  1128 kbit/s, 341 keyframes and ACKs. No malformed WebSocket frame was observed.
+  This bounded pass does not prove the old failure's cause or long-term absence.
+- The original PCM connection failed around 166 s. The new log captured
+  `incomplete write bytes=512/960 errno=11` (EAGAIN), with a 1.158 s failed
+  send. It sent 7,902,960 complete frames, had 48,240 confirmed gap frames
+  (1.005 s), no epoch reset and a 332.561 ms longest successful send. This
+  establishes partial progress followed by a socket error, not its underlying
+  Wi-Fi/TCP cause. A 100 ms socket timeout did not bound observed wall time.
+- A replacement PCM observer completed 280.003 s, receiving 278.840 s of audible
+  audio. It had 1.135 s confirmed gaps, no epoch change and a 373.416 ms longest
+  successful send. Final errno 104 logs followed normal probe closures and are
+  separate from the earlier errno 11 failure. The retry does not erase that
+  failure. There was a period with no network audio listener, so this is not
+  ten uninterrupted minutes of three consumers.
+- `VIDEO/up-000139.ts` saved 121,839,604 bytes and 6,358 video frames. H.264 and
+  stereo 48 kHz AAC-LC decoded strictly; audio duration was 600.021333 s, RMS
+  0.010511, with 38,254,161 active decoded samples. Recorder queue drops were
+  zero; 118 silence frames (2.46 ms) were inserted. Capture-overrun samples
+  remained zero. AAC packet times were continuous to approximately 1 us
+  rounding precision; this is not a physical A/V synchronization measurement.
+- The recording helper correctly returned failure for its original parallel
+  audio observer while retaining `decode_passed: true`. Original settings
+  were restored and the browser resumed. The revised HTTP firmware remains
+  installed for evaluation; [PR #7](https://github.com/ZacharyLeahan/espkvm-xbox/pull/7)
+  remains draft/unmerged, stacked on the diagnostic PR #6.
+
+Nineteen active-recording samples after startup had 44,423..64,363 bytes
+internal free and 12,793,256..12,830,064 bytes PSRAM free. The post-recording
+sample had 87,355 and 16,807,492 bytes respectively. No progressive loss was
+apparent in this bounded test. Status/log/memory sampling every approximately
+30 seconds is part of the load. The monitor's console summary omitted the
+listener flag; the detailed saved status correctly shows the original listener
+ended before the three-minute observation.
+
+Decision: retain the tested complete-write correction for review, but do not
+mark live PCM continuity resolved or infer a causal performance improvement
+from different movie scenes. Further work must address send stalls/timeouts
+and repeat the combined test without reconnecting either live consumer. Raw
+media and logs stay local in `/tmp/espkvm-http-endurance-02/`. Saved-file SHA-256:
+`a35758ef2b40dd6fcaef36f2cb9437e20f612b686cb76f80f2d67360b9f546f3`.
+
 ## Audible movie endurance follow-up (2026-10-17)
 
 **Recording validation passed; uninterrupted live streaming failed.** The user
