@@ -250,3 +250,21 @@ The documented `espkvm/mcp` repository
 returned "Repository not found" during this work, so its integration could not
 be updated. An MCP wrapper should expose status as a read-only tool and keep
 bounded WAV capture explicit, preserving the single-listener conflict and auth.
+
+### Optional sender task sampling
+
+For delivery investigations, build with `CONFIG_KVM_AUDIO_TASK_SAMPLING=y`
+(and FreeRTOS trace support). It defaults off. One priority-7 observer with a
+3 KB stack samples the PCM sender once per scheduler tick while a PCM socket
+write is in progress. Disconnect logs report `sample_ok` through the last
+successful write, and `sample_all` including the final failed write; this keeps
+a slow client-close failure separate from normal delivery. `poll_max_us` reports
+the longest observed sampling interval.
+
+These are coarse observations, not CPU-time percentages. Tick alignment,
+observer preemption and SMP execution can bias counts. Runnable combines ready
+and running states; blocked may include transport and TCP/IP worker waits.
+Neither count proves Wi-Fi loss or isolates a specific scheduler bottleneck.
+The observer stops before its sender context is released. Allocation failure
+logs unavailability and leaves PCM streaming usable. Disable sampling again
+for normal playback and latency measurements.
