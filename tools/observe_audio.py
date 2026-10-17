@@ -39,8 +39,8 @@ def main(argv=None):
     if (url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password
             or url.query or url.fragment or url.path not in ('', '/')):
         parser.error('URL must be an HTTP(S) origin without credentials, query or path')
-    if not 0 < args.seconds <= 60:
-        parser.error('Duration must be between 0 and 60 seconds')
+    if not 0 < args.seconds <= 600:
+        parser.error('Duration must be between 0 and 600 seconds')
     cookies = http.cookiejar.MozillaCookieJar()
     if args.cookies:
         cookies.load(str(args.cookies), ignore_discard=True)

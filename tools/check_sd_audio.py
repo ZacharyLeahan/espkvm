@@ -76,7 +76,7 @@ class Device:
                 if not chunk:
                     break
                 count += len(chunk)
-                if count > 256 * 1024 * 1024 or time.monotonic() > deadline:
+                if count > 512 * 1024 * 1024 or time.monotonic() > deadline:
                     raise CheckFailed('Clip download exceeded its size/time bound')
                 out.write(chunk)
                 digest.update(chunk)
@@ -339,7 +339,7 @@ def check(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('url', help='Device HTTP(S) origin without credentials')
-    parser.add_argument('--seconds', type=int, default=8, help='Bounded recording duration, 1..60 (default: 8)')
+    parser.add_argument('--seconds', type=int, default=8, help='Bounded recording duration, 1..600 (default: 8)')
     parser.add_argument('--output-dir', required=True, type=Path, help='New ignored/outside-checkout evidence directory')
     parser.add_argument('--no-network-audio', action='store_true', help='Do not open a parallel live-audio listener')
     parser.add_argument('--expect-audio', action=argparse.BooleanOptionalAction, default=True)
@@ -351,8 +351,8 @@ def main(argv=None):
     if (url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password
             or url.query or url.fragment or url.path not in ('', '/')):
         parser.error('URL must be an HTTP(S) origin without credentials, query or path')
-    if not 1 <= args.seconds <= 60:
-        parser.error('--seconds must be in 1..60')
+    if not 1 <= args.seconds <= 600:
+        parser.error('--seconds must be in 1..600')
     if args.video_only:
         args.expect_audio = False
         args.no_network_audio = True

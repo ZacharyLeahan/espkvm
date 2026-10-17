@@ -33,6 +33,16 @@ capture/queue diagnostics, not proof of perceptual synchronization or sound qual
 Keep private firmware backups and credentials out of published evidence. Do not
 format the card for a test.
 
+## Ten-minute combined test (2026-10-17)
+
+With live video and PCM streaming, `VIDEO/up-001362.ts` saved 7,580 video frames
+and 600.064 seconds of active stereo AAC. Both tracks passed strict decoding;
+recorder video/audio drop counts were zero, track starts matched, and AAC packet
+timing was continuous to rounding precision. Memory recovered after stopping.
+Live video averaged 4.2 fps; network audio captured 596.760 seconds of PCM over
+600.017 seconds, so streaming continuity still needs work even though the saved
+recording passed. See the [extended test evidence and limits](UPSTREAM-REVIEW.md#ten-minute-combined-streamingrecording-test-2026-10-17).
+
 ## H.264 cache correction (2026-10-17)
 
 The reliability branch now flushes CPU-edited SPS/keyframe data before the
@@ -116,10 +126,16 @@ file using `ffprobe` and `ffmpeg`. It refuses to take over an active recording.
 ```sh
 python3 tools/check_sd_audio.py http://esp.local --seconds 8 --output-dir ignore/sd-check-8s
 python3 tools/check_sd_audio.py http://esp.local --seconds 60 --output-dir ignore/sd-check-60s
+python3 tools/check_sd_audio.py http://esp.local --seconds 600 --output-dir ignore/sd-check-10min
 python3 tools/check_sd_audio.py http://esp.local --seconds 8 --video-only --output-dir ignore/sd-check-video-only
 # Add --no-network-audio to test SD alone or leave an existing listener alone.
 # Authenticated HTTPS: --cookies cookies.txt --ca espkvm-ca.pem
 ```
+
+Recording and PCM observation tools accept up to 600 seconds; downloads remain
+bounded to 512 MiB. For a live-video load, start `tools/video_probe.mjs` after
+the helper reports the recording path, with a duration that ends before the
+recording does. Do not operate the recorder concurrently.
 
 Use a new output directory for each run. Media stays local and on the card;
 these checks do not delete recordings. The result distinguishes decoded audio
