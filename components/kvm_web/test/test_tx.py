@@ -18,6 +18,7 @@ harness = r'''
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#define ESP_LOGW(tag, ...) ((void)(tag), (void)printf(__VA_ARGS__))
 #define TX_MAX_SOCKETS 16
 #define portMAX_DELAY -1
 #define HTTPD_SOCK_ERR_FAIL -1
@@ -130,6 +131,8 @@ int main(void) {
     reset(); send_errno = EPIPE;
     assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
     reset(); send_elapsed = 100000; results[0] = 2; results[1] = 4; count = 2;
+    assert(locked_http_send(NULL,10,expected,6,0) == 6 && writes == 2 && shut == 0);
+    reset(); send_elapsed = 5000000; results[0] = 2; results[1] = 4; count = 2;
     assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
     reset(); s_tx_fds[0] = -1;
     assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 0);

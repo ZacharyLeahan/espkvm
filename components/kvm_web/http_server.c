@@ -2761,15 +2761,13 @@ static int locked_http_send(httpd_handle_t hd, int sockfd, const char *buf, size
     (void)hd;
     const int slot = tx_lock(sockfd);
     if (slot < 0) return HTTPD_SOCK_ERR_FAIL;
-    struct timeval timeout = {0};
-    socklen_t timeout_len = sizeof(timeout);
-    int64_t budget = 5000000;
-    if (getsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, &timeout_len) == 0) {
-        const int64_t configured = (int64_t)timeout.tv_sec * 1000000 + timeout.tv_usec;
-        if (configured > 0 && configured < budget) budget = configured;
-    }
-    const int64_t deadline = esp_timer_get_time() + budget;
+    /* send() retains SO_SNDTIMEO for each blocking call, including PCM's
+     * 100 ms timeout. A short successful write may already consume that time;
+     * do not turn it into a failure before the remaining bytes can be sent.
+     * This outer bound only prevents endless progress/interruption retries. */
+    const int64_t deadline = esp_timer_get_time() + 5000000;
     size_t done = 0;
+    int failure_errno = 0;
     while (done < buf_len && esp_timer_get_time() < deadline) {
         const ssize_t ret = send(sockfd, buf + done, buf_len - done, flags);
         if (ret > 0 && (size_t)ret <= buf_len - done) {
@@ -2779,10 +2777,16 @@ static int locked_http_send(httpd_handle_t hd, int sockfd, const char *buf, size
         } else {
             /* EAGAIN/EWOULDBLOCK is the blocking socket's send timeout.
              * Do not renew that timeout by retrying the same stalled write. */
+            failure_errno = ret < 0 ? errno : 0;
             break;
         }
     }
-    if (done != buf_len) shutdown(sockfd, SHUT_RDWR);
+    if (done != buf_len) {
+        if (esp_timer_get_time() >= deadline) failure_errno = ETIMEDOUT;
+        shutdown(sockfd, SHUT_RDWR);
+        ESP_LOGW("http_tx", "incomplete write bytes=%u/%u errno=%d",
+                 (unsigned)done, (unsigned)buf_len, failure_errno);
+    }
     tx_unlock(slot);
     return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
 }
