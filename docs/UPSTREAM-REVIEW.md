@@ -137,6 +137,32 @@ only; heap/stack diagnostics and frame freshness remain outstanding.
   measurements and real tunnel enable/reconnect remain unverified. No flash or
   push was performed; other transport/dependency adaptations remain in progress.
 
+## Video acknowledgement progress (2026-10-16)
+
+Implementation: [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd).
+Adapts the ACK/window subset of `f28e9ff` and server reference recovery from
+`5afe5a5`; it does not yet include per-session transport locks or active-session
+LRU protection.
+
+- After picture subscription, the server advertises binary byte `0x85`. A
+  compatible client acknowledges received frames with byte `0x09` followed by
+  the frame's 32-bit little-endian sequence. This acknowledges arrival, not
+  decoding, rendering, sound or physical latency. Older clients remain usable.
+- The two-frame window activates only after an ACK matches a recorded send.
+  Duplicate/stale ACKs do not release newer frames. Outstanding sends expire
+  individually after 500 ms, and client-slot reuse resets negotiation. Malformed
+  ACK lengths and oversized client messages are rejected.
+- Skipped H.264 references hold back subsequent deltas until a keyframe, with
+  repair requests limited to one per 300 ms. Failed fragmented sends close the
+  affected session. This policy does not change recording bitrate.
+- Sanitizer tests cover old clients, activation, duplicates/stale ACKs,
+  out-of-order ACKs, timeout boundaries, sequence wrap and reconnect reset.
+  The final audio-enabled firmware build passed without warnings in the
+  incremental build. CI includes the ACK test.
+- Combined browser/device tests, slow-link behavior, per-client locking, TLS
+  partial-write handling and simultaneous SD AAC/PCM verification remain open.
+  No flash, push or measured latency claim accompanies this commit.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
