@@ -113,6 +113,46 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## Main integration and direct C6 version query (2026-10-17)
+
+On explicit maintainer approval, [PR #6](https://github.com/ZacharyLeahan/espkvm-xbox/pull/6)
+and [PR #7](https://github.com/ZacharyLeahan/espkvm-xbox/pull/7) were merged to
+`main` as [5d7cd915](https://github.com/ZacharyLeahan/espkvm-xbox/commit/5d7cd915a4bf0a2a60ff78193a547e40547d5552)
+and [7480ad88](https://github.com/ZacharyLeahan/espkvm-xbox/commit/7480ad8843513a026da2fd4d7e7c5833c7128f27).
+Their build/check matrices passed. This
+supersedes the earlier draft-status notes, not their unresolved streaming,
+HTTPS and physical-latency acceptance gaps. Diagnostic options remain off.
+
+A temporary P4-only diagnostic queried the running peer with
+`esp_hosted_get_coprocessor_fwversion()` (ESP-Hosted host 3.0.9), instead of
+relying on the optional boot version TLV. Both attempts returned `ESP_FAIL`
+after approximately five seconds; each subsequent `esp_wifi_get_ps()` returned
+`ESP_OK`, mode 0. The peer version remains **unknown**. These results cannot
+distinguish an unsupported command from failed response delivery or parsing.
+The temporary query delayed PCM headers by 4.998 and 5.008 seconds; both bounded
+observers timed out. These are diagnostic-induced startup failures, not new
+steady-state transport evidence. The probe is not retained in normal firmware.
+
+[Espressif's MCU compatibility matrix](https://github.com/espressif/esp-hosted-mcu/blob/main/docs/migration.md)
+(accessed 2026-10-17, also checked in the installed 3.0.9 package) describes 3.x
+MCU hosts as backward-compatible with 0.0.6+ streaming, 1.x and 2.x peers.
+Therefore the boot warning alone does not prove an unsupported pairing or a
+streaming fix from an upgrade. No C6 firmware, credentials or network settings
+were changed. The diagnostic build passed with existing Microlink warnings;
+TX and ACK-parser host tests passed. Local logs and the temporary patch remain
+under `/tmp/espkvm-c6-*`; raw logs are not published.
+
+The diagnostics-off build and app-only restoration passed. A 10.005-second
+smoke test delivered 9.955 seconds of quiet PCM (zero active frames), confirming
+stream service but not audible playback. Video viewing was restored and the
+recorder was idle.
+
+Next: repeat the same bounded audio/video workload through a second access
+point with both hosts on that path. Keep firmware, queue sizes, source content
+and test duration fixed; compare gaps, longest sends and receiver arrival
+spacing. This requires an available second network. Do not change C6 firmware
+until its current image and a recovery path are established.
+
 ## C6 receive boundary and radio power state (2026-10-17)
 
 Implementation: [71732e9](https://github.com/ZacharyLeahan/espkvm-xbox/commit/71732e9).
