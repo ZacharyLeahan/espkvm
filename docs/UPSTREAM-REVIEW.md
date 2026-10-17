@@ -178,6 +178,68 @@ Local media/logs remain in `/tmp/espkvm-repair-idr.h264`,
 and the remaining combined-device gates still precede publication and final
 acceptance of the five areas.
 
+## Dependency publication and integration checks (2026-10-16)
+
+Published `upstream-reliability-xbox` branches in the console, Microlink and API
+skills forks. Firmware [b8e2ab6](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b8e2ab60b7d0684a3b55e6fc038f5964dbbb4108)
+pins console `a258024` and Microlink `d3210a0`, and includes the rebuilt viewer.
+API documentation is published at `60949e4` on the matching skills branch.
+This supersedes earlier statements that dependency publication/pins were still
+pending. It does not mark the feature branch ready to merge into `main`.
+
+- A fresh audio-disabled firmware build passed, with only the previously
+  identified Microlink unused-symbol warnings. The audio-enabled build also
+  passed with HTTPS compiled in for upcoming TLS transport validation.
+- A uniquely named 2,097,152-byte synthetic image uploaded in about 2.65 seconds
+  after the capture tests. Its card listing reported exactly 2,097,152 bytes.
+  Only that test file was then deleted; absence was checked. Internal free
+  memory was 93,279 bytes before and after. This proves the normal live upload
+  path, not that smaller-buffer fallback was exercised or file contents were
+  read back. Allocation-failure coverage remains the host fault-injection test.
+- The host Tailscale client was running. A direct discovery ping to the ESP
+  succeeded in 37 ms, then an HTTP video-status request through its tailnet IP
+  succeeded. TSMP probes did not reply. Earlier HTTP timeouts therefore do not
+  establish persistent tunnel failure, but startup recovery, relay operation
+  and sustained tunnel media still need testing.
+- HTTPS was disabled at compile time in the previous test profile. Merely
+  enabling its saved setting could not activate the feature; the capability
+  endpoint explicitly reported it absent. The original setting was restored
+  before preparing an HTTPS-capable test image. HTTPS acceptance must be based
+  on that image, not on prior HTTP-only tests.
+
+### HTTPS validation boundary
+
+The HTTPS-capable image served its public authentication endpoint with TLS
+verified against the CA exported by the device. Its stored login requirement
+became active once HTTPS support was compiled in; the earlier profile had
+suppressed both HTTPS and authentication at compile time. No saved password
+was changed or guessed. Protected TLS video/audio testing therefore remains
+pending an authenticated session. A successful public handshake does not prove
+media transport, logout revocation or browser WebCodecs behavior.
+
+[ffe1eef](https://github.com/ZacharyLeahan/espkvm-xbox/commit/ffe1eef79e6a5374cba3f1e8ad4e804dc3f5b443)
+adds an optional explicit CA to the video probe. Local TLS fixtures verify both
+acceptance of the supplied CA and rejection of an unrelated CA; earlier
+ACK/short-control/early-disconnect fixture cases still pass. Test certificates
+and private build configuration stay outside Git.
+
+The previous HTTP-only build configuration and original `sec_https=false`
+setting were restored after this test. The device again reported no login
+requirement, 1280x720 signal, advancing capture frames and a fresh frame age.
+Stored credentials were left unchanged. HTTPS media validation remains gated
+on an authenticated session rather than being claimed from the public endpoint.
+
+### Recorded-clip MP4 compatibility
+
+The production `ts_to_mp4.c` converter, compiled on the host with a 1280x720
+fixture driver, converted the new 30-second TS capture successfully. The MP4
+contained H.264 and 48 kHz stereo AAC; both decoded without errors. AAC payload
+hashes matched after removing TS-only ADTS framing, and decoded float PCM hashes
+matched exactly between TS and MP4. This is new-image recording/container
+compatibility evidence. It is not an on-device conversion workload test, a
+physical sync measurement, or proof of audible source sound (this source was
+quiet). The local output is `/tmp/espkvm-adapt-remux/card-recording.mp4`.
+
 ## Video adaptation progress (2026-10-16)
 
 This implementation update follows the reconciliation above; it does not mark
