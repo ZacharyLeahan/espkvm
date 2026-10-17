@@ -25,6 +25,8 @@ static uint32_t frames, overruns, active_frames;
 static float peak, rms, peak_max;
 static int64_t last_samples;
 static i2s_chan_handle_t rx;
+// The one-listener guard owns this reference until its worker has finished.
+static kvm_auth_session_ref_t stream_session;
 #define AUDIO_SAMPLES ((CONFIG_KVM_AUDIO_RATE / 200) * 2)
 #define AUDIO_STACK_BYTES 6144
 typedef struct {
@@ -125,7 +127,7 @@ static void stream_task(void *arg)
     bool running = enable_err == ESP_OK;
     for (;;) {
         if (enable_err != ESP_OK) break;
-        if (!kvm_cap_active(KVM_CAP_AUDIO) || !kvm_auth_socket_ok(fd)) break;
+        if (!kvm_cap_active(KVM_CAP_AUDIO) || !kvm_auth_session_ok(&stream_session)) break;
         size_t received = 0;
         const size_t bytes = AUDIO_SAMPLES * (CONFIG_KVM_AUDIO_SLOT_BITS / 8);
         esp_err_t err = i2s_channel_read(rx, &buffers->raw, bytes, &received, 500);
@@ -185,7 +187,7 @@ static void stream_task(void *arg)
         // A send error still closes the connection, including socket timeouts.
         discard_backlog = esp_timer_get_time() - start > 100000;
         // Logout revokes access to the stream as well as ordinary requests.
-        if (!kvm_cap_active(KVM_CAP_AUDIO) || !kvm_auth_socket_ok(httpd_req_to_sockfd(req))) { break; }
+        if (!kvm_cap_active(KVM_CAP_AUDIO) || !kvm_auth_session_ok(&stream_session)) { break; }
     }
     if (!sent) {
         // Presence check only: polling aliases fast clocks, so this is not a frequency measurement.
@@ -213,9 +215,9 @@ static void stream_task(void *arg)
     }
     // Closing the session terminates the close-delimited response for fetch.
     httpd_handle_t server = req->handle;
-    kvm_auth_forget_socket(fd);
     httpd_req_async_handler_complete(req);
     httpd_sess_trigger_close(server, fd);
+    stream_session = (kvm_auth_session_ref_t){0};
     atomic_store(&busy, false);
     vTaskDelete(NULL);
 }
@@ -265,7 +267,8 @@ static esp_err_t audio_status(httpd_req_t *req)
 
 static esp_err_t audio_stream(httpd_req_t *req)
 {
-    if (!kvm_auth_check(req)) return kvm_auth_challenge(req);
+    kvm_auth_session_ref_t session;
+    if (!kvm_auth_capture_session(req, &session)) return kvm_auth_challenge(req);
 #if CONFIG_KVM_ENABLE_AUDIO
     if (!kvm_cap_active(KVM_CAP_AUDIO)) {
         httpd_resp_set_status(req, "503 Service Unavailable");
@@ -284,13 +287,12 @@ static esp_err_t audio_stream(httpd_req_t *req)
     portENTER_CRITICAL(&stats_lock);
     frames = overruns = active_frames = 0; peak = rms = peak_max = 0; last_samples = 0;
     portEXIT_CRITICAL(&stats_lock);
-    int fd = httpd_req_to_sockfd(req);
     httpd_req_t *async = NULL;
     err = httpd_req_async_handler_begin(req, &async);
     if (err == ESP_OK) {
-        kvm_auth_mark_socket(httpd_req_to_sockfd(req));
+        stream_session = session;
         if (xTaskCreate(stream_task, "hdmi_audio", AUDIO_STACK_BYTES, async, 6, NULL) == pdPASS) return ESP_OK;
-        kvm_auth_forget_socket(fd);
+        stream_session = (kvm_auth_session_ref_t){0};
         httpd_resp_set_status(async, "503 Service Unavailable");
         httpd_resp_sendstr(async, "Audio task unavailable");
         httpd_req_async_handler_complete(async);

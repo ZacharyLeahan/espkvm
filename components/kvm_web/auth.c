@@ -40,7 +40,8 @@
 #define SALT_LEN 16
 #define HASH_LEN 32
 #define TOKEN_BYTES 16
-#define TOKEN_CHARS (TOKEN_BYTES * 2)
+#define TOKEN_CHARS KVM_AUTH_SESSION_CHARS
+_Static_assert(TOKEN_CHARS == TOKEN_BYTES * 2, "session tokens are hex encoded");
 
 /*
  * Chosen by measurement, and lower than the usual advice: one iteration costs
@@ -715,6 +716,42 @@ bool kvm_auth_check(httpd_req_t *req)
         return false;
     }
     return true;
+}
+
+bool kvm_auth_capture_session(httpd_req_t *req, kvm_auth_session_ref_t *out)
+{
+    if (!out) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    if (!kvm_auth_check(req)) {
+        return false;
+    }
+    if (!kvm_auth_required()) {
+        return true;
+    }
+    if (!cookie_token(req, out->token, sizeof(out->token)) || !kvm_auth_session_ok(out)) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    return true;
+}
+
+bool kvm_auth_session_ok(const kvm_auth_session_ref_t *session)
+{
+    if (!session) {
+        return false;
+    }
+    if (!kvm_auth_required()) {
+        return true;
+    }
+    lock();
+    // Look up the original cookie, rather than trusting a once-marked socket.
+    // session_find expires missing/old sessions and refreshes a live one's TTL.
+    const session_t *current = session_find(session->token);
+    const bool ok = current && !current->must_change;
+    unlock();
+    return ok;
 }
 
 esp_err_t kvm_auth_reject_ws(httpd_req_t *req)

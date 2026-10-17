@@ -111,6 +111,25 @@ bool kvm_auth_origin_ok(httpd_req_t *req);
 
 bool kvm_auth_check(httpd_req_t *req);
 
+/**
+ * An HTTP stream keeps its originating session after response headers are sent.
+ * Treat this RAM-only reference as a credential: never log or expose it.
+ */
+#define KVM_AUTH_SESSION_CHARS 32
+typedef struct {
+    char token[KVM_AUTH_SESSION_CHARS + 1];
+} kvm_auth_session_ref_t;
+
+/** Authenticate a request and retain its session for a long-lived HTTP stream. */
+bool kvm_auth_capture_session(httpd_req_t *req, kvm_auth_session_ref_t *out);
+
+/**
+ * Check the retained session with the ordinary sliding expiry. Logout, password
+ * changes and session replacement revoke it. A stream opened with login off
+ * stops if login is enabled later, since it has no authenticated session.
+ */
+bool kvm_auth_session_ok(const kvm_auth_session_ref_t *session);
+
 /** Send the 401 that tells the console to show a login form. */
 esp_err_t kvm_auth_challenge(httpd_req_t *req);
 
