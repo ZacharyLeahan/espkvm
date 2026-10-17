@@ -6,10 +6,12 @@ The remote viewer can receive stereo PCM from the C790 through the ESP32-P4.
 The touchscreen does not need speakers. This implementation is opt-in and needs
 separate I2S wiring; the CSI ribbon carries video only.
 
-**The ESP's microSD Record feature currently saves video only.** Browser audio
-and `tools/observe_audio.py` are separate: the latter saves its WAV on the
-computer running the tool. They do not add an audio track to the card recording.
-See the [saved-file test](SD-RECORDING.md#audio-track-check-2026-10-16).
+**MicroSD Record now includes AAC-LC stereo audio when HDMI audio is enabled.**
+The browser and recorder share capture with independent queues. Closing or muting
+browser playback does not stop a recording. Recordings keep the audio choice they
+started with. Timelapses are silent; audio pre-roll needs microSD dashcam mode,
+because RAM history currently stores video only. See [recording and validation](SD-RECORDING.md).
+`tools/observe_audio.py` still saves a separate WAV on the computer running it.
 
 Software validation: firmware build with audio enabled, browser playback of a
 synthetic 440 Hz mock source, network-chunk reassembly and playback queue tests,
@@ -161,20 +163,20 @@ It also had `CONFIG_KVM_CAPTURE_720P_MAX=y`; see the validation report for those
 additional settings and the distinction between the live and fresh builds.
 
 Build the web console before building the firmware. After installing an audio
-build, turn on **Stream HDMI audio** in Settings, then click **Enable audio** in
+build, turn on **HDMI audio** in Settings, then click **Enable audio** in
 the viewer. Volume affects local playback only; the meter measures the source.
-Disabling the setting stops an existing stream without rebooting. There is one
+Disabling the setting stops an existing stream without rebooting. There is one network
 audio listener at a time; video and controller input remain independent.
 
 ## Delay and performance
 
 At 48 kHz, uncompressed stereo 16-bit audio uses 192,000 bytes/second (1.536
-Mbit/s before HTTP/TCP/TLS overhead). There is no audio encoder load. Eight DMA
+Mbit/s before HTTP/TCP/TLS overhead). Browser playback stays PCM. MicroSD recording adds a 160 kbit/s stereo AAC-LC encoder. Eight DMA
 buffers hold about 40 ms total; the worker reads roughly 5 ms at a time. At 48 kHz, each 960-byte PCM block
 fits one TCP packet. CPU-side working buffers live in PSRAM. A
 separate asynchronous HTTP task keeps audio reads out of the HTTP server loop.
 TCP_NODELAY avoids Nagle delay; sends have a 100 ms socket timeout. A DMA
-overrun discards the affected block and resets capture to fresh samples. A completed slow send also resets capture; a failed send closes the connection.
+overrun discards the affected block and resets capture to fresh samples. Network backpressure drops stale browser-queue blocks or closes that connection; it does not reset the recorder.
 The browser independently discards stale bursts. P4 SDIO transfer buffers honor
 the configured PSRAM preference with cache-aligned allocations and an internal
 RAM fallback. The Xbox profile also prefers PSRAM for lwIP packet allocations.
@@ -208,8 +210,10 @@ A video viewing token does not authorize audio. Responses are not cached.
   proof of wiring), `enabled`, `streaming`, `rate`, `channels`, `frames`,
   `overruns`, `peak`, `rms`, `sample_age_ms`, `active_frames`, and `peak_max`.
   An audio-disabled build returns `available:false` and `reason` instead.
-  Counters reset for each new listener and persist after disconnect. Frames
-  count capture, not confirmed playback. Peak/RMS are normalized 0-1 for the
+  Counters describe shared capture and reset when its producer starts from idle.
+  They persist after the last subscriber leaves. `streaming` means the network
+  listener; SD capture can continue while it is false. Frames count capture,
+  not confirmed playback. Peak/RMS are normalized 0-1 for the
   latest captured block; `peak_max` preserves brief transients. Active frames
   count stereo frames with either channel exceeding 32/32768 (about -60 dBFS).
   `sample_age_ms` is -1 until samples arrive. Monitoring is passive: opening

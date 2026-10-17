@@ -18,6 +18,7 @@ idf_component_register(
         kvm_config
         kvm_storage
         kvm_record
+        kvm_audio
         kvm_net
         kvm_atx
         kvm_display
@@ -38,7 +39,6 @@ idf_component_register(
         kvm_board
         esp_http_client
         esp-tls
-        esp_driver_i2s
         esp_driver_gpio
     EMBED_FILES
         "assets/index.html.gz"

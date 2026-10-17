@@ -56,8 +56,9 @@ components/
   kvm_hid/        composite USB HID (kbd/abs+rel mouse/consumer) + MSC
   kvm_storage/    microSD mount, bus speed, virtual media (images served read-only)
   kvm_config/     NVS settings, capability registry, thermal guard
+  kvm_audio/      shared timestamped HDMI I2S capture, independent browser/SD queues
   kvm_record/     recording/screenshots to the card, dashcam ring and segments,
-                  timelapse, .ts muxer, MP4 remux with chapters, keystroke .srt
+                  timelapse, H.264/AAC .ts muxer, MP4 remux with chapters, keystroke .srt
   kvm_web/        HTTPS server, REST + WebSocket, auth, self-signed TLS, OTA
   kvm_net/        Ethernet + mDNS + WireGuard (kvm_wg) + native Tailscale (kvm_ts)
   kvm_board/      pin map (thin: names the Kconfig CONFIG_ values)

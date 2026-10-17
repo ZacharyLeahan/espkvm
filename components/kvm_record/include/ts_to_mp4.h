@@ -10,10 +10,12 @@
  * The index goes at the front of the file, so it starts playing before it has
  * all arrived, and the moments that made the clip become chapters.
  *
- * Reads the .ts twice - once for the sample table, once for the samples - so
- * memory stays a few kilobytes per minute of video. Plain C over callbacks, so
- * it is tested on a host. Only reads what ts_mux writes: one H.264 access unit
- * per PES packet, on one PID.
+ * Reads the .ts twice - once for the sample tables, once for the samples - so
+ * memory holds compact metadata rather than the recording. Plain C over callbacks,
+ * so it is tested on a host. Only reads what ts_mux writes: one H.264 access unit
+ * per PES on PID 0x100, plus optional AAC-LC ADTS frames on PID 0x101. Audio
+ * and video share a 90 kHz timestamp origin. Start offsets and capture gaps
+ * are retained; unsupported or changing AAC formats fail conversion.
  */
 #pragma once
 

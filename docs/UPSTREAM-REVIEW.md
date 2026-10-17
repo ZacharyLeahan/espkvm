@@ -177,3 +177,29 @@ measured sample activity from subjective sound quality and physical latency.
 `main` is this fork's maintained Xbox branch. Reviewable contributions can be
 prepared as focused branches containing the relevant commits; retaining a
 permanent `xbox-experiments` branch is not required for upstream review.
+
+
+## Shared HDMI capture and microSD AAC (2026-10-16)
+
+This fork adds an independent I2S producer with bounded browser and recorder
+queues, recorder-side AAC accumulation on the video clock, AAC in MPEG-TS, and
+AAC-preserving MP4 remuxing. Network disconnect and backpressure do not own the
+recorder's capture lifetime. Host tests cover timeline loss/reset/splits and
+container audio parsing; hardware results are recorded in [SD-RECORDING.md](SD-RECORDING.md).
+
+The AAC codec is a managed Espressif dependency, not copied implementation:
+
+- P4 rev >=3: `esp_audio_codec` 2.6.2, source package commit
+  [f9110cbb](https://github.com/espressif/esp-adf-libs/tree/f9110cbb471b4017b0faf9bd48fcac84c61ecb6d/esp_audio_codec).
+- Earlier P4: 2.5.0, source package commit
+  [3bb83597](https://github.com/espressif/esp-adf-libs/tree/3bb83597d07b604e1ab5b78dd4370a28d6fa802d/esp_audio_codec).
+- Dependency selection is conditional on audio being compiled. The newer
+  optimized library cannot be used on older P4 silicon. The package's
+  [Espressif-only license](https://components.espressif.com/components/espressif/esp_audio_codec/versions/2.6.2/license)
+  and [VisualOn attribution](https://docs.espressif.com/projects/esp-adf/en/latest/COPYRIGHT.html)
+  are acknowledged in NOTICE. This is a dependency integration, not an adaptation
+  of upstream recorder implementation commits.
+
+API companion updates are in [skills commit 85ea5ac](https://github.com/ZacharyLeahan/espkvm-skills-xbox/commit/85ea5ac).
+The viewer reports audio recording in [console commit 60c39f0](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/60c39f0). `espkvm/mcp` was inaccessible
+(HTTP 404), so its recorder/audio contract still needs a maintainer update.

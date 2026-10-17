@@ -25,6 +25,11 @@ bumps the patch).
 
 ### Added
 
+- Include optional AAC-LC stereo audio in microSD TS recordings and preserve it
+  in MP4 clip conversion. Share HDMI capture across independent recorder/browser
+  queues, preserve timing through dropped PCM with silence, and expose recording
+  audio counters. Timelapses remain silent; audio pre-roll requires SD dashcam.
+
 - Experimental, opt-in C790 I2S audio for the remote viewer, with volume, source
   meter, bounded playback buffering, capture diagnostics and bounded WAV evidence.
   Established browser streams reconnect after brief network interruptions,

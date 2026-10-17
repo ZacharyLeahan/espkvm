@@ -1,14 +1,114 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# microSD recording: first hardware trial
+# microSD video and audio recording
 
-Experimental. Keep a private
-known-good firmware backup and restore it after testing. Never publish local
-sdkconfig files or firmware containing network credentials.
+Enable **HDMI audio** in Settings before starting a normal recording. With the
+C790 I2S cable connected, Record/Stop saves **H.264 video and AAC-LC stereo audio**
+in the same `.ts` file under `VIDEO/` on the microSD. Browser audio can run at the
+same time; muting or closing the viewer does not stop SD capture. With HDMI audio
+disabled, recordings remain video-only. The audio choice is kept for the duration
+of each recording.
 
-## Audio track check (2026-10-16)
+- Audio uses 16-bit source PCM at the configured capture rate, encoded at
+  160 kbit/s stereo (1024 samples per AAC frame). The tested wiring uses 48 kHz.
+- On the Function EV profile, the encoder/writer stack uses external RAM so
+  Wi-Fi and I2S retain internal memory.
+- Video and audio share a timestamp origin. A one-second independent PCM queue
+  absorbs short card stalls. Lost PCM is replaced with timed silence rather than
+  shortening the audio timeline; `audioDropped` and `audioSilenceFrames` expose it.
+- If enabled audio cannot start, the recording fails with a clear reason. If
+  capture or encoding fails after starting, the file closes and status reports
+  the error. A silent soundtrack is valid; absence of I2S clocks is not.
+- Timelapses intentionally omit sound. Audio pre-roll needs **microSD** dashcam
+  mode; RAM pre-roll with audio enabled returns an explanatory error.
+- The on-device clip MP4 converter retains AAC. Ordinary Record/Stop saves TS;
+  a computer can remux it without encoding using `ffmpeg -i clip.ts -c copy clip.mp4`.
+  GIFs cannot contain sound.
 
-**Record/Stop currently saves video only, even when HDMI audio is enabled.**
+`GET /api/v1/record/status` and `GET /api/v1/video/status` (under `record`) include
+`audio`, `audioFrames`, `audioDropped`, and `audioSilenceFrames`. Counts are PCM
+frames per channel; encoded totals include final AAC-frame padding. These are
+capture/queue diagnostics, not proof of perceptual synchronization or sound quality.
+
+Keep private firmware backups and credentials out of published evidence. Do not
+format the card for a test.
+
+## Hardware verification (2026-10-16)
+
+Installed on Function EV P4 rev 3.2 with C790, 48 kHz/32-bit-slot I2S,
+720p60 HDMI input, H.264 target 4,000 kbit/s, 30-fps cap, Wi-Fi, and the
+existing Xbox/Bluetooth/LCD profile. The capture allocations were limited to
+720p. Final private firmware SHA-256:
+`834e55027c9eb0342050c790269ad7d4af4489958e6bad786b8cf7f96e726593`.
+
+| Trial | Saved result |
+| --- | --- |
+| SD only, 8 seconds | 166 video frames; 48 kHz stereo AAC, 386,048 decoded audio frames; zero audio queue or video drops. |
+| Parallel network audio, 8 seconds | Both tracks decoded; zero audio queue or video drops after the scheduling fix. This immediate post-boot trial delivered only 40 video frames. |
+| Audio disabled, 8 seconds | `VIDEO/up-000162.ts`, 174 video frames, 8.002233 s, zero audio tracks, successful decode and zero video drops; audio was restored to enabled afterward. |
+| Parallel network audio, 60 seconds | `VIDEO/up-000066.ts`, 16,413,904 bytes; 863 video frames (about **14.4 fps**), 2,882,560 decoded audio frames (60.0533 s), zero audio queue or recorder video drops. One remote H.264 viewer was also connected during status sampling. |
+
+The one-minute TS has exactly one 1280x720 H.264 track and one AAC-LC stereo
+track. Both start at 0.700000 s (the TS decoder lead). AAC timestamps are
+continuous to rounding precision; audio RMS is 0.005519 and peak 0.081610 on a
+normalized scale. The 702 inserted-silence frames include startup alignment and
+final AAC padding; no recorder queue loss occurred. The separate network
+capture delivered 59.165 seconds in 60.003 seconds, with detected sound.
+At 54 seconds, shared capture reported zero DMA overruns and fresh samples.
+
+The actual saved one-minute TS was also passed through the firmware's own C
+MP4 converter **on the host**. Both MP4 tracks decoded successfully; start times
+were zero, video duration 60.040122 s and audio 60.053333 s. This establishes
+container/export behavior, not an on-device dashcam conversion soak.
+
+One-minute TS SHA-256:
+`1ba0336efd0000065c3edcbe866534ed0b00f555c24bdd08c2db4ef80868ef47`.
+Test media and raw logs remain in ignored local evidence folders. The clips
+remain on the card. Video settings were restored after each trial.
+
+The first integration exposed two issues that were fixed before the final
+one-minute run: a 40 KB internal stack allocation failed, so the writer uses
+PSRAM on this profile; and priority 4 let video/network work starve the AAC
+writer, losing 3.89 seconds of PCM in an eight-second parallel test. Audio
+recording now runs at priority 6. The final one-minute run's longest measured
+card write was 127.7 ms and audio pump 158.1 ms; minimum spare writer stack was
+36,808 bytes. These are observed maxima, not worst-case guarantees.
+
+Final enabled and disabled firmware builds passed without new warnings. Six
+recorder host suites, real-codec TS/MP4 round trips (including gaps and padded
+split boundaries), six hardware-helper tests, three WAV-tool tests, and 68 web
+tests passed. CI now includes the host checks; a hosted CI run is not claimed.
+
+**Limits:** this is a one-minute 720p test, not hours of recording or a locked
+30/60 fps result. Absolute lip-sync, AAC priming, physical latency, and sustained
+SD dashcam pre-roll still need measurement. The source must retain the
+configured PCM sample rate; changing it mid-recording is unsupported.
+
+## Reproduce a bounded recording check
+
+Use the current audio-enabled hardware profile, H.264 capture support, and a
+known audible stereo PCM HDMI source. The helper restores the prior video
+settings, saves only allowlisted configuration values, and checks the downloaded
+file using `ffprobe` and `ffmpeg`. It refuses to take over an active recording.
+
+```sh
+python3 tools/check_sd_audio.py http://esp.local --seconds 8 --output-dir ignore/sd-check-8s
+python3 tools/check_sd_audio.py http://esp.local --seconds 60 --output-dir ignore/sd-check-60s
+python3 tools/check_sd_audio.py http://esp.local --seconds 8 --video-only --output-dir ignore/sd-check-video-only
+# Add --no-network-audio to test SD alone or leave an existing listener alone.
+# Authenticated HTTPS: --cookies cookies.txt --ca espkvm-ca.pem
+```
+
+Use a new output directory for each run. Media stays local and on the card;
+these checks do not delete recordings. The result distinguishes decoded audio
+activity from silence and reports container timing; it does not establish
+physical lip-sync. Host checks are `sh components/kvm_record/test/run.sh`,
+`python3 components/kvm_record/test/test_audio_roundtrip.py`, and
+`python3 -m unittest discover -s tools -p test_check_sd_audio.py`.
+
+## Before integration: audio track check (2026-10-16)
+
+**The previous firmware saved video only, even when HDMI audio was enabled.**
 A fresh bounded eight-second recording was saved on the microSD as
 `VIDEO/up-001764.ts`, then downloaded and inspected with `ffprobe`:
 
@@ -28,8 +128,8 @@ File SHA-256: `92cb56b0990ad17421288a66b6a9c96afcc12bc238dbd411f96fe70e55385a58`
 ffprobe -v error -show_entries stream=index,codec_type,codec_name,sample_rate,channels,width,height:format=duration,size -of json clip.ts
 ```
 
-Code inspection agrees: `ts_mux.c` declares one H.264 stream, `kvm_record.c`
-feeds only video frames into it, and `ts_to_mp4.c` produces only a video track.
+At that checkpoint, `ts_mux.c` declared one H.264 stream, `kvm_record.c`
+fed only video frames into it, and `ts_to_mp4.c` produced only a video track.
 The four existing recorder host tests passed, but they cover video/container,
 frame-buffer and subtitle behavior, not audio. The separate WAV tool saves on
 the computer running it. Adding microSD audio requires a recorder audio input,
@@ -60,7 +160,7 @@ or simultaneous LCD and SD operation. The configured bitrate is a target, not
 the actual bitrate. Recorder drops do not count every possible source-frame
 omission. In particular, 60-Hz HDMI input does not mean 60-fps recording.
 
-## Existing API workflow
+## Earlier 480p trial workflow (2026-10-04)
 
 Use the existing authenticated API or the trusted-LAN profile; do not expose
 the latter to the public internet. Save the original `vid_codec`, `vid_fps_max`

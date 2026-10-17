@@ -26,6 +26,7 @@
  * jumps rather than showing a smeared picture.
  */
 #include "kvm_record.h"
+#include "sdkconfig.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -47,10 +48,12 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "keylog.h"
 #include "kvm_settings.h"
 #include "kvm_storage.h"
 #include "record_priv.h"
+#include "record_audio.h"
 #include "screentext.h"
 #include "screentext_store.h"
 #include "ts_mux.h"
@@ -98,6 +101,9 @@ static volatile bool s_stop;
 static portMUX_TYPE s_mu = portMUX_INITIALIZER_UNLOCKED;
 static kvm_record_status_t s_st;
 static int64_t s_started_us;
+static record_audio_t *s_audio;
+static int64_t s_audio_pump_max_us;
+static int64_t s_card_write_max_us;
 
 /* The ring and the feed. s_ring_mu guards the ring's contents. */
 static SemaphoreHandle_t s_ring_mu;
@@ -828,6 +834,7 @@ static void write_chunk(void)
         return;
     }
     if (!s_write_failed && s_file) {
+        const int64_t write_started = esp_timer_get_time();
         if (fwrite(s_chunk, 1, s_chunk_len, s_file) != s_chunk_len) {
             const int e = errno;
             s_write_failed = true;
@@ -846,6 +853,8 @@ static void write_chunk(void)
             s_st.bytes += s_chunk_len;
             portEXIT_CRITICAL(&s_mu);
         }
+        const int64_t elapsed = esp_timer_get_time() - write_started;
+        if (elapsed > s_card_write_max_us) s_card_write_max_us = elapsed;
     }
     s_chunk_len = 0;
 }
@@ -1094,14 +1103,41 @@ static void close_file(void)
     }
 }
 
+static bool write_audio(ts_mux_t *mux, int64_t through_us, bool finish)
+{
+    if (!s_audio) return true;
+    const int64_t began = esp_timer_get_time();
+    const esp_err_t err = record_audio_pump(s_audio, mux, through_us, finish);
+    const int64_t elapsed = esp_timer_get_time() - began;
+    if (elapsed > s_audio_pump_max_us) s_audio_pump_max_us = elapsed;
+    record_audio_stats_t stats;
+    record_audio_stats(s_audio, &stats);
+    portENTER_CRITICAL(&s_mu);
+    s_st.audio_frames = stats.frames;
+    s_st.audio_dropped = stats.dropped_frames;
+    s_st.audio_silence_frames = stats.silence_frames;
+    portEXIT_CRITICAL(&s_mu);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "recording audio failed: %s", esp_err_to_name(err));
+        set_stopped("HDMI audio capture or encoding failed");
+        s_stop = true;
+        return false;
+    }
+    return true;
+}
+
 static void writer_task(void *arg)
 {
     (void)arg;
     ts_mux_t mux;
     ts_mux_init(&mux, on_packet, NULL);
+    ts_mux_set_audio(&mux, s_audio != NULL);
     int64_t t0_us = 0;
+    int64_t last_video_us = 0;
+    int64_t video_step_us = 33333;
     int64_t stop_at_us = 0; /* frames after this are not ours; 0 until a stop */
     int64_t synced_us = esp_timer_get_time();
+    const int64_t waiting_since_us = synced_us;
 
     for (;;) {
         if (s_stop && !stop_at_us) {
@@ -1133,6 +1169,16 @@ static void writer_task(void *arg)
 
         const int64_t now = esp_timer_get_time();
         if (!have) {
+            /* Unplugging HDMI must close the recording even before its first
+             * keyframe, when the duration limit has no timestamp origin yet. */
+            if (now - (last_video_us ? last_video_us : waiting_since_us) > 5000000) {
+                set_stopped("video capture stopped producing frames");
+                break;
+            }
+            if (end_us && now >= end_us) {
+                set_stopped(end_why ? end_why : "stopped");
+                break;
+            }
             /* Nothing queued. After a stop, a moment for the last frames to arrive. */
             if (stop_at_us && (!s_feed_running || now - stop_at_us > 1500000)) {
                 break;
@@ -1153,6 +1199,10 @@ static void writer_task(void *arg)
             if (take) {
                 if (!t0_us) {
                     t0_us = e.at_us;
+                    if (record_audio_begin(s_audio, e.at_us) != ESP_OK) {
+                        set_stopped("could not initialise the recording audio encoder");
+                        break;
+                    }
                 }
                 if (!s_part_t0_us) {
                     s_part_t0_us = e.at_us;
@@ -1166,6 +1216,7 @@ static void writer_task(void *arg)
                 if (e.keyframe && e.at_us != s_part_t0_us &&
                     (s_file_bytes >= PART_MAX_BYTES || clip_done ||
                      (s_split_us && e.at_us - s_part_t0_us >= s_split_us))) {
+                    if (!write_audio(&mux, e.at_us, true)) break;
                     close_file();
                     if (s_background) {
                         seg_ended(e.at_us, clip_done);
@@ -1196,6 +1247,11 @@ static void writer_task(void *arg)
                         s_stop = true;
                     } else {
                         ts_mux_init(&mux, on_packet, NULL);
+                        ts_mux_set_audio(&mux, s_audio != NULL);
+                        if (record_audio_begin(s_audio, e.at_us) != ESP_OK) {
+                            set_stopped("could not restart the recording audio encoder");
+                            break;
+                        }
                         s_tl_frame = 0;
                         portENTER_CRITICAL(&s_mu);
                         snprintf(s_st.file, sizeof(s_st.file), "%s", rel);
@@ -1210,6 +1266,11 @@ static void writer_task(void *arg)
                 const uint64_t pts = s_every_us ? (uint64_t)s_tl_frame++ * (90000u / TIMELAPSE_FPS)
                                                 : (uint64_t)(e.at_us - s_part_t0_us) * 9u / 100u;
                 ts_mux_frame(&mux, s_frame, e.len, pts, e.keyframe);
+                if (last_video_us && e.at_us - last_video_us < 100000) {
+                    video_step_us = e.at_us - last_video_us;
+                }
+                last_video_us = e.at_us;
+                if (!write_audio(&mux, e.at_us, false)) break;
                 portENTER_CRITICAL(&s_mu);
                 s_st.frames++;
                 portEXIT_CRITICAL(&s_mu);
@@ -1232,6 +1293,11 @@ static void writer_task(void *arg)
         }
     }
 
+    if (last_video_us && !s_write_failed) {
+        (void)write_audio(&mux, last_video_us + video_step_us, true);
+    }
+    record_audio_close(s_audio);
+    s_audio = NULL;
     close_file();
     if (s_subs_on) {
         drain_key_events(INT64_MAX / 2);
@@ -1287,8 +1353,11 @@ static void writer_task(void *arg)
     if (s_finished_cb && st.frames && !background) {
         s_finished_cb(&done);
     }
+    ESP_LOGI(TAG, "writer stack minimum free: %u bytes", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    ESP_LOGI(TAG, "writer longest audio pump=%lld us, card write=%lld us",
+             (long long)s_audio_pump_max_us, (long long)s_card_write_max_us);
     xSemaphoreGive(s_writer_done);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 /* ---- control ------------------------------------------------------------------ */
@@ -1387,6 +1456,16 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
         xSemaphoreGive(s_ctl);
         return ESP_ERR_NO_MEM;
     }
+#if CONFIG_KVM_ENABLE_AUDIO
+    const bool want_audio = !every_s && kvm_setting_bool("aud_enable");
+#else
+    const bool want_audio = false;
+#endif
+    if (want_audio && event_title && pre_s) {
+        snprintf(why, why_cap, "audio pre-roll needs microSD dashcam mode; RAM history contains video only");
+        xSemaphoreGive(s_ctl);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     char rel[64];
     char stamp_base[48];
     if (background) {
@@ -1415,6 +1494,8 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
     s_file_bytes = 0;
     s_chunk_len = 0;
     s_write_failed = false;
+    s_audio_pump_max_us = 0;
+    s_card_write_max_us = 0;
     s_chunk = heap_caps_aligned_alloc(64, WRITE_CHUNK, MALLOC_CAP_SPIRAM);
     if (!s_chunk || !feed_ensure()) {
         heap_caps_free(s_chunk);
@@ -1423,12 +1504,24 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
         xSemaphoreGive(s_ctl);
         return ESP_ERR_NO_MEM;
     }
+    if (want_audio) {
+        const esp_err_t err = record_audio_open(&s_audio);
+        if (err != ESP_OK) {
+            heap_caps_free(s_chunk);
+            s_chunk = NULL;
+            snprintf(why, why_cap, "HDMI audio is enabled but capture could not start (%s)", esp_err_to_name(err));
+            xSemaphoreGive(s_ctl);
+            return err;
+        }
+    }
     s_background = background;
     if (background) {
         s_bg_stopped[0] = '\0';
     }
     s_file = open_part(rel, sizeof(rel));
     if (!s_file) {
+        record_audio_close(s_audio);
+        s_audio = NULL;
         s_background = false;
         heap_caps_free(s_chunk);
         s_chunk = NULL;
@@ -1483,6 +1576,7 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
         s_limit_us = 0;
     }
     const keylog_mode_t subs = (keylog_mode_t)kvm_setting_int("rec_subs");
+    bool allocated_bg_cues = false;
     s_part_t0_us = 0;
     s_subs_on = false;
     /* A timelapse's clock is not the wall clock, so subtitles would not line up. */
@@ -1490,6 +1584,7 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
         /* The dashcam keeps its cues in memory; a clip writes its own .srt. */
         if (!s_bg_cues) {
             s_bg_cues = heap_caps_calloc(BG_CUES, sizeof(bg_cue_t), MALLOC_CAP_SPIRAM);
+            allocated_bg_cues = s_bg_cues != NULL;
             s_bg_cue_head = 0;
             s_bg_cue_count = 0;
         }
@@ -1529,6 +1624,10 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
         snprintf(s_st.file, sizeof(s_st.file), "%s", rel);
         s_started_us = now;
     }
+    s_st.audio = s_audio != NULL;
+    s_st.audio_frames = 0;
+    s_st.audio_dropped = 0;
+    s_st.audio_silence_frames = 0;
     s_chapter_count = 0;
     if (event_title) {
         if (have_past && first.at_us < now) {
@@ -1547,9 +1646,32 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
     s_stop = false;
     (void)xSemaphoreTake(s_writer_done, 0);
     s_active = true;
-    if (xTaskCreate(writer_task, "kvm_rec_wr", 4096, NULL, WRITER_PRIO, NULL) != pdPASS) {
+    uint32_t stack_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+#if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    /* AAC's stack must not consume the internal RAM needed by Wi-Fi and I2S. */
+    if (s_audio) stack_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+#endif
+    if (xTaskCreateWithCaps(writer_task, "kvm_rec_wr", s_audio ? 40960 : 4096, NULL,
+                            s_audio ? FEED_PRIO : WRITER_PRIO, NULL, stack_caps) != pdPASS) {
+        record_audio_close(s_audio);
+        s_audio = NULL;
         fclose(s_file);
         s_file = NULL;
+        /* No writer ran, so discard only the empty file this start created. */
+        char failed_path[96];
+        snprintf(failed_path, sizeof(failed_path), "%s/%s", kvm_storage_mount_point(), rel);
+        struct stat failed_stat;
+        if (stat(failed_path, &failed_stat) == 0 && failed_stat.st_size == 0) {
+            remove(failed_path);
+        }
+        if (background) {
+            portENTER_CRITICAL(&s_mu);
+            if (s_seg_count && s_segs[s_seg_count - 1].n == s_seg_next - 1 &&
+                !s_segs[s_seg_count - 1].t0_us) {
+                s_seg_count--;
+            }
+            portEXIT_CRITICAL(&s_mu);
+        }
         heap_caps_free(s_chunk);
         s_chunk = NULL;
         s_active = false;
@@ -1559,6 +1681,16 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
         s_subs_on = false;
         close_srt();
         close_txt();
+        heap_caps_free(s_text_grid);
+        heap_caps_free(s_text_buf);
+        s_text_grid = NULL;
+        s_text_buf = NULL;
+        if (allocated_bg_cues) {
+            heap_caps_free(s_bg_cues);
+            s_bg_cues = NULL;
+            s_bg_cue_head = 0;
+            s_bg_cue_count = 0;
+        }
         snprintf(why, why_cap, "could not start the recorder");
         xSemaphoreGive(s_ctl);
         return ESP_FAIL;

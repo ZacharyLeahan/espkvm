@@ -634,7 +634,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
     const char *rec_blocked = rec.recording ? NULL : kvm_record_blocked();
     const char *shot_blocked = kvm_record_screenshot_blocked();
 
-    char body[1400];
+    char body[1664];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"inputHz\":%u,\"tooFast\":%s,"
@@ -651,7 +651,8 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      "\"dropped\":%u,\"stopped\":\"%s\",\"blocked\":%s%s%s,"
                      "\"event\":%s,\"dashcam\":%s,\"dashcamNoMemory\":%s,\"prerollSeconds\":%u,"
                      "\"timelapse\":%u,\"clipSecondsLeft\":%u,\"clipsConverting\":%u,"
-                     "\"lastClip\":\"%s\"},"
+                     "\"lastClip\":\"%s\",\"audio\":%s,\"audioFrames\":%llu,"
+                     "\"audioDropped\":%llu,\"audioSilenceFrames\":%llu},"
                      "\"screenshotBlocked\":%s%s%s}",
                      capture_source_power_known() ? "true" : "false",
                      st.signal ? "true" : "false", (unsigned)st.hres, (unsigned)st.vres,
@@ -671,7 +672,9 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      rec.dashcam ? "true" : "false", rec.dashcam_no_memory ? "true" : "false",
                      (unsigned)rec.preroll_seconds,
                      (unsigned)rec.timelapse_every, (unsigned)rec.clip_seconds_left,
-                     (unsigned)rec.clips_converting, rec.last_clip, shot_blocked ? "\"" : "",
+                     (unsigned)rec.clips_converting, rec.last_clip, rec.audio ? "true" : "false",
+                     (unsigned long long)rec.audio_frames, (unsigned long long)rec.audio_dropped,
+                     (unsigned long long)rec.audio_silence_frames, shot_blocked ? "\"" : "",
                      shot_blocked ? shot_blocked : "null", shot_blocked ? "\"" : "");
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");

@@ -32,6 +32,11 @@ typedef struct {
     uint32_t frames;
     /** Frames left out: the card fell behind, or the stream skipped one. */
     uint32_t dropped;
+    /** AAC track selected at start; frames are PCM samples per channel. */
+    bool audio;
+    uint64_t audio_frames;
+    uint64_t audio_dropped;
+    uint64_t audio_silence_frames;
     /** Why the last recording ended, or "" if none has. */
     char stopped[96];
     /** The recording is a dashcam clip. */

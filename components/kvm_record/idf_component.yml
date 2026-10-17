@@ -1,0 +1,12 @@
+dependencies:
+  # AAC recording is optional. Keep audio-disabled builds free of the codec.
+  # P4 rev 3.x uses the optimized library; earlier silicon needs the C variant.
+  espressif/esp_audio_codec:
+    version: "2.6.2"
+    rules:
+      - if: "$CONFIG{KVM_ENABLE_AUDIO} == True"
+    matches:
+      - if: "target == esp32p4 && $CONFIG{ESP32P4_REV_MIN_FULL} >= 300"
+        version: "2.6.2"
+      - if: "target != esp32p4 || $CONFIG{ESP32P4_REV_MIN_FULL} < 300"
+        version: "2.5.0"

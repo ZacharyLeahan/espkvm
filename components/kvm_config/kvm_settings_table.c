@@ -578,9 +578,10 @@ static const kvm_setting_t s_settings[] = {
     /* ---- audio ---------------------------------------------------------- */
     {
         .key = "aud_enable", .section = "audio", .type = KVM_VT_BOOL,
-        .title = "Stream HDMI audio",
+        .title = "HDMI audio",
         .help = "Only works once BCLK, LRCK and DATA are wired from the capture board "
-                "to the ESP32-P4.",
+                "to the ESP32-P4. Enables browser sound and audio in new microSD recordings. "
+                "Timelapses stay silent; audio pre-roll requires microSD dashcam mode.",
         .def = 0, .requires_cap = KVM_CAP_AUDIO,
     },
 

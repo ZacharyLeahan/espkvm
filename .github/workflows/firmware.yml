@@ -47,6 +47,10 @@ jobs:
       # The cron parser and matcher.
       - run: components/kvm_sched/test/run.sh
       - run: python3 -m unittest discover -s tools -p test_observe_audio.py
+      - run: python3 -m unittest discover -s tools -p test_check_sd_audio.py
+      - run: sh components/kvm_record/test/run.sh
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: python3 components/kvm_record/test/test_audio_roundtrip.py
 
   # The console's own logic: the fake machine the demo runs on, the settings
   # file, the keyboard tables, the text layer. Node runs the TypeScript as it
