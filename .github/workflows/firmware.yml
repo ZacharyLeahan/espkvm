@@ -41,6 +41,7 @@ jobs:
       - run: components/video_pipeline/test/run.sh
       - run: python3 components/tc358743/test/run.py
       - run: python3 components/kvm_web/test/test_upload_buffers.py
+      - run: sh components/kvm_web/test/run.sh
       - run: python3 components/kvm_net/test/test_wg_lazy.py
       # Two settings on one pin. This one guards what arrives from outside -
       # a board overlay naming a GPIO something else already holds.

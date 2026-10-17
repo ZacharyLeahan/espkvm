@@ -9,6 +9,10 @@ bumps the patch).
 
 ### Fixed
 
+- Negotiate a two-frame acknowledgement window with compatible video viewers;
+  ignore duplicate/stale acknowledgements and recover missing H.264 references
+  with bounded keyframe requests. Older viewers keep their existing behavior.
+
 - Allow microSD image uploads to use smaller or fewer PSRAM buffers when memory
   is fragmented, retaining the refusal to upload during recording.
 - Allocate the classic WireGuard worker only on first enable; concurrent enable

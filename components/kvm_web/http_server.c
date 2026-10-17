@@ -2,6 +2,7 @@
  * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "video_ack.h"
 #include "http_server.h"
 
 #include "sdkconfig.h" /* the CONFIG_ guards below are read before any of them */
@@ -3533,6 +3534,7 @@ static bool s_video_need_key[VIDEO_MAX_CLIENTS];
  * A half-open socket left by an unclean disconnect, or a viewer that stopped
  * reading, sits here until it is dropped - so it never gets a spinning TLS send. */
 static int s_video_stall[VIDEO_MAX_CLIENTS];
+static video_ack_t s_video_ack[VIDEO_MAX_CLIENTS];
 /*
  * A subscriber on this socket wants the screen read as characters, not encoded
  * as pictures. It is the same socket and the same table because it is the same
@@ -3587,6 +3589,7 @@ static void video_add_client(int fd, bool text)
             s_video_fds[i] = fd;
             s_video_need_key[i] = true;
             s_video_stall[i] = 0;
+            s_video_ack[i] = (video_ack_t){0};
             s_text_mode[i] = text;
             s_text_need_full[i] = text;
             /* Bound sends to this viewer. esp-tls left the socket non-blocking, so a
@@ -3628,6 +3631,7 @@ static void video_drop_client_locked(int index)
     s_video_fds[index] = -1;
     s_video_need_key[index] = false;
     s_video_stall[index] = 0;
+    s_video_ack[index] = (video_ack_t){0};
     s_text_mode[index] = false;
     s_text_need_full[index] = false;
     if (was_text) {
@@ -3909,6 +3913,18 @@ static void text_push(httpd_handle_t server)
  * wrapped in an async request handler - doing so leaves the handshake
  * unfinished and no frame ever reaches the client.
  */
+/* Ask for an IDR to repair a broken reference chain, at most every 300 ms:
+   IDRs are the biggest frames and would feed the overload they repair. */
+static void video_request_repair_idr(void)
+{
+    static int64_t s_last_us;
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us - s_last_us > 300000) {
+        s_last_us = now_us;
+        video_frame_request_keyframe();
+    }
+}
+
 static void video_pump_task(void *arg)
 {
     httpd_handle_t server = (httpd_handle_t)arg;
@@ -3959,18 +3975,12 @@ static void video_pump_task(void *arg)
          * delta breaks the decoder's reference chain and the picture shatters
          * until a keyframe. The gap says exactly when that happened: ask for an
          * IDR now and the repair arrives within a frame or two instead of at the
-         * next scheduled keyframe. Rate-limited so a sustained overload asks for
-         * keyframes at a bounded rate rather than for every dropped frame (IDRs
-         * are the biggest frames - that would feed the very overload it repairs).
+         * next scheduled keyframe.
          */
-        if (last_seq != 0 && (uint32_t)(f.seq - last_seq) > 1u &&
-            f.payload == VIDEO_PAYLOAD_H264) {
-            static int64_t s_gap_idr_us;
-            const int64_t now_us = esp_timer_get_time();
-            if (now_us - s_gap_idr_us > 300000) {
-                s_gap_idr_us = now_us;
-                video_frame_request_keyframe();
-            }
+        const bool reference_gap = last_seq != 0 && (uint32_t)(f.seq - last_seq) > 1u &&
+                                   f.payload == VIDEO_PAYLOAD_H264;
+        if (reference_gap) {
+            video_request_repair_idr();
         }
         last_seq = f.seq;
 
@@ -4003,6 +4013,7 @@ static void video_pump_task(void *arg)
         memcpy(packet + VIDEO_HDR_LEN, f.data, f.len);
         const size_t packet_len = VIDEO_HDR_LEN + f.len;
         const bool keyframe = f.keyframe;
+        const int f_payload = f.payload;
         video_frame_release(&f);
 
         httpd_ws_frame_t frame = {
@@ -4021,6 +4032,7 @@ static void video_pump_task(void *arg)
          */
         int targets[VIDEO_MAX_CLIENTS];
         int target_count = 0;
+        bool repair = false;
         if (xSemaphoreTake(s_video_mu, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -4032,8 +4044,16 @@ static void video_pump_task(void *arg)
             if (s_text_mode[i]) {
                 continue; /* reading the screen, not watching it */
             }
+            if (reference_gap) s_video_need_key[i] = true;
             if (s_video_need_key[i] && !keyframe) {
-                continue; /* still waiting for its first decodable frame */
+                continue; /* a missing reference must be repaired before more deltas */
+            }
+            if (video_ack_blocked(&s_video_ack[i], esp_timer_get_time())) {
+                if (f_payload == VIDEO_PAYLOAD_H264 && !s_video_need_key[i]) {
+                    s_video_need_key[i] = true;
+                    repair = true;
+                }
+                continue;
             }
             /*
              * Only send to a client that can take the frame now. A viewer whose TCP
@@ -4052,14 +4072,24 @@ static void video_pump_task(void *arg)
             if (select(fd + 1, NULL, &wfds, NULL, &tv0) <= 0 || !FD_ISSET(fd, &wfds)) {
                 if (++s_video_stall[i] >= VIDEO_STALL_DROP_FRAMES) {
                     video_drop_client_locked(i);
+                } else if (f_payload == VIDEO_PAYLOAD_H264 && !s_video_need_key[i]) {
+                    /* This viewer misses a frame its decoder needs: hold its
+                       deltas until a keyframe, and ask for one. A slow Wi-Fi
+                       link hit this every few seconds. */
+                    s_video_need_key[i] = true;
+                    repair = true;
                 }
                 continue;
             }
             s_video_stall[i] = 0;
             s_video_need_key[i] = false; /* decodable frame (a keyframe if it was waiting) */
+            video_ack_sent(&s_video_ack[i], last_seq, esp_timer_get_time());
             targets[target_count++] = fd;
         }
         xSemaphoreGive(s_video_mu);
+        if (repair) {
+            video_request_repair_idr();
+        }
 
         for (int i = 0; i < target_count; i++) {
             const int64_t send_t0 = esp_timer_get_time();
@@ -4074,6 +4104,9 @@ static void video_pump_task(void *arg)
                 /* A viewer that has gone stops being counted, which is also
                  * what lets the encoder go idle again. */
                 video_remove_client(targets[i]);
+                /* A partial fragmented message cannot be followed by another
+                 * data message safely. End the session instead of reusing it. */
+                (void)httpd_sess_trigger_close(server, targets[i]);
             }
         }
     }
@@ -4137,6 +4170,18 @@ static esp_err_t ws_pre_handshake(httpd_req_t *req)
     return ESP_OK;
 }
 
+static void video_client_acked(int fd, uint32_t seq)
+{
+    if (!s_video_mu || xSemaphoreTake(s_video_mu, portMAX_DELAY) != pdTRUE) return;
+    for (int i = 0; i < VIDEO_MAX_CLIENTS; i++) {
+        if (s_video_fds[i] == fd && !s_text_mode[i]) {
+            (void)video_ack_received(&s_video_ack[i], seq);
+            break;
+        }
+    }
+    xSemaphoreGive(s_video_mu);
+}
+
 static esp_err_t video_ws_handler(httpd_req_t *req)
 {
     /* Only frames reach here; the handshake was answered, and authenticated,
@@ -4162,11 +4207,21 @@ static esp_err_t video_ws_handler(httpd_req_t *req)
      * have to guess.
      */
     uint8_t hello[8] = {0};
+    if (pkt.type != HTTPD_WS_TYPE_BINARY) return ESP_OK;
+    if (pkt.len > sizeof(hello)) return ESP_FAIL;
     if (pkt.len) {
         pkt.payload = hello;
-        (void)httpd_ws_recv_frame(req, &pkt, sizeof(hello));
+        err = httpd_ws_recv_frame(req, &pkt, sizeof(hello));
+        if (err != ESP_OK) return err;
     }
     const int fd = httpd_req_to_sockfd(req);
+    if (pkt.len && hello[0] == 0x09) { /* negotiated frame ACK */
+        if (pkt.len != 5) return ESP_FAIL;
+        const uint32_t seq = (uint32_t)hello[1] | ((uint32_t)hello[2] << 8) |
+                             ((uint32_t)hello[3] << 16) | ((uint32_t)hello[4] << 24);
+        video_client_acked(fd, seq);
+        return ESP_OK;
+    }
     /*
      * A second message from a client that is already watching asks for a
      * keyframe. The console needs that when its own decoder has lost the
@@ -4183,7 +4238,12 @@ static esp_err_t video_ws_handler(httpd_req_t *req)
         video_frame_request_keyframe();
         return ESP_OK;
     }
-    video_add_client(fd, hello[0] == WS_SUBSCRIBE_TEXT);
+    const bool text = hello[0] == WS_SUBSCRIBE_TEXT;
+    video_add_client(fd, text);
+    if (!text && video_client_watches_picture(fd)) {
+        const uint8_t ack_support = 0x85;
+        ws_send_binary(fd, &ack_support, 1);
+    }
     return ESP_OK;
 }
 
