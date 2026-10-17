@@ -193,6 +193,30 @@ LRU subsets of `f28e9ff`. Live transport acceptance is still outstanding.
   push or before/after performance claim was made in this step. Diagnostics and
   remaining Microlink validation are still unfinished parts of the five-area goal.
 
+## Capture diagnostic progress (2026-10-16)
+
+Implementation: [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), adapting the frame-freshness subset of `11c11cf`
+and `psramLargest` from `cae095f`. Companion API contract:
+[4afef83](https://github.com/ZacharyLeahan/espkvm-skills-xbox/commit/4afef8318cd5755df78289c9720b959f58bf3348).
+
+- `video/status.frames` counts CSI completions since boot, including discard
+  buffers, independently of encoder/viewer demand. It wraps at 2^32. The counter
+  and timestamp are read together under the ISR/task lock.
+- `frameAgeMs` is null before the first completion, ages when capture stops,
+  and saturates at 4294967294 ms. Neither field proves display, encoding,
+  recording, A/V synchronization or physical latency.
+- `system/info.psramLargest` complements total `psramFree` to expose
+  fragmentation. Older Xbox images can omit all three new fields; companion
+  documentation now explicitly separates fork support from upstream versions.
+- Audio-enabled firmware build passed without warnings in this incremental
+  build. Runtime stop/restart, no-viewer capture and fragmented-memory response
+  verification are still outstanding. Upstream MCP access was rechecked and
+  still returned HTTP 404; no MCP update is claimed.
+- Task heap/stack endpoint remains outstanding. Upstream keeps task-name
+  pointers after its snapshot, and its debug task-snapshot API does not acquire
+  locks. Review task lifetime on this two-core IDF build before copying that
+  implementation. This does not defer the requested diagnostic scope permanently.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
