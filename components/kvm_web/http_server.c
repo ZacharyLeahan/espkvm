@@ -4868,6 +4868,10 @@ httpd_handle_t http_server_start(void)
         register_route(h, &record_uris[i]);
     }
 
+    size_t n_memory = 0;
+    const httpd_uri_t *memory_uris = memory_api_routes(&n_memory);
+    for (size_t i = 0; i < n_memory; i++) register_route(h, &memory_uris[i]);
+
     size_t n_audio = 0;
     const httpd_uri_t *audio_uris = audio_api_routes(&n_audio);
     for (size_t i = 0; i < n_audio; i++) {

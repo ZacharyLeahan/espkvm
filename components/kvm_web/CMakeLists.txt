@@ -6,6 +6,7 @@ idf_component_register(
         "fw_install.c"
         "record_api.c"
         "audio_api.c"
+        "memory_api.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES

@@ -9,6 +9,10 @@ bumps the patch).
 
 ### Fixed
 
+- Add authenticated heap and task-stack diagnostics with owned task metadata
+  copied during a coordinated two-core snapshot. Report snapshot duration and
+  explicit unavailability when memory or task tracing cannot support it.
+
 - Discover Microlink and WireGuard by their real component paths so source
   copies can build without preserving the dependency symlink.
 

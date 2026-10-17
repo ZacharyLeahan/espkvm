@@ -156,3 +156,6 @@ CONFIG_TINYUSB_RESUME_CALLBACK=y
 
 # exFAT needs the volume-label API (ff.c uses it outside a preprocessor test).
 CONFIG_FATFS_USE_LABEL=y
+
+# Task stack diagnostics (no runtime-stat timer or formatting helpers).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y

@@ -19,3 +19,5 @@ const httpd_uri_t *record_api_routes(size_t *count);
 void kvm_web_clock_from_browser(long long t);
 
 const httpd_uri_t *audio_api_routes(size_t *count);
+
+const httpd_uri_t *memory_api_routes(size_t *count);
