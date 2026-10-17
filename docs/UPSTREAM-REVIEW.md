@@ -115,6 +115,8 @@ rerun for this documentation update.
 
 ## Nonblocking HTTP deadline experiment (2026-10-17)
 
+Implementation and evidence: [456d090](https://github.com/ZacharyLeahan/espkvm-xbox/commit/456d090).
+
 This follow-up supersedes the blocking-write policy in the historical section
 below. The local ESP-IDF lwIP dependency at `c6f2f878e7b0f86033214b85547d579be43351e3`
 checks blocked netconn write timeouts from ACK/poll callbacks
