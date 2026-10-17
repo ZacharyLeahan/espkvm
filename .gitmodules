@@ -1,6 +1,6 @@
 [submodule "web"]
 	path = web
-	url = https://github.com/espkvm/console.git
+	url = https://github.com/ZacharyLeahan/espkvm-console-xbox.git
 [submodule "third_party/microlink"]
 	path = third_party/microlink
 	url = https://github.com/ZacharyLeahan/microlink.git

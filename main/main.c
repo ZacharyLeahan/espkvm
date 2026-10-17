@@ -266,7 +266,7 @@ static void report_pending_capabilities(void)
     /* Wake-on-LAN needs only the network, which is up by the time anything can
      * ask for it. */
     kvm_cap_report(KVM_CAP_WOL, true, NULL);
-    kvm_cap_report(KVM_CAP_AUDIO, false, "audio capture not implemented yet");
+    kvm_audio_probe();
     kvm_cap_report(KVM_CAP_NET_STATIC, true, NULL);
     /* HTTPS reports itself from the web server, which knows whether the TLS
      * listener actually came up. */

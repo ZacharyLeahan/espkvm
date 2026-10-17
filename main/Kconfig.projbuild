@@ -2,6 +2,34 @@ menu "ESP-KVM"
 
     orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
 
+    menu "HDMI audio (experimental)"
+        config KVM_AUDIO_BCLK
+            int "C790 SCK / BCLK GPIO"
+            depends on KVM_ENABLE_AUDIO
+            range -1 54
+            default -1
+        config KVM_AUDIO_WS
+            int "C790 WFS / LRCK GPIO"
+            depends on KVM_ENABLE_AUDIO
+            range -1 54
+            default -1
+        config KVM_AUDIO_DIN
+            int "C790 SD / data GPIO"
+            depends on KVM_ENABLE_AUDIO
+            range -1 54
+            default -1
+        config KVM_AUDIO_RATE
+            int "Source PCM sample rate (Hz)"
+            depends on KVM_ENABLE_AUDIO
+            range 32000 96000
+            default 48000
+        config KVM_AUDIO_SLOT_BITS
+            int "Source I2S slot width (16 or 32)"
+            depends on KVM_ENABLE_AUDIO
+            range 16 32
+            default 32
+    endmenu
+
     menu "Features"
         config KVM_XBOX_BLE
             bool "Experimental Xbox Bluetooth discovery"

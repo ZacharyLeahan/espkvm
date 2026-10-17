@@ -5,6 +5,7 @@ idf_component_register(
         "auth.c"
         "fw_install.c"
         "record_api.c"
+        "audio_api.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES
@@ -37,6 +38,7 @@ idf_component_register(
         kvm_board
         esp_http_client
         esp-tls
+        esp_driver_i2s
         esp_driver_gpio
     EMBED_FILES
         "assets/index.html.gz"

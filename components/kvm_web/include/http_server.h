@@ -10,3 +10,6 @@ httpd_handle_t http_server_start(void);
 
 /** Put the headers every answer carries on this response, before its body. */
 void kvm_web_security_headers(httpd_req_t *req);
+
+/** Probe the configured I2S receiver; does not verify external wiring. */
+void kvm_audio_probe(void);

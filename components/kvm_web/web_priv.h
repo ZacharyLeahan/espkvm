@@ -18,3 +18,4 @@ const httpd_uri_t *record_api_routes(size_t *count);
 /** Set the clock from the browser's time (Unix seconds) if it was never set. */
 void kvm_web_clock_from_browser(long long t);
 
+const httpd_uri_t *audio_api_routes(size_t *count);

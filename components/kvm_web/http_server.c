@@ -4683,6 +4683,12 @@ httpd_handle_t http_server_start(void)
         register_route(h, &record_uris[i]);
     }
 
+    size_t n_audio = 0;
+    const httpd_uri_t *audio_uris = audio_api_routes(&n_audio);
+    for (size_t i = 0; i < n_audio; i++) {
+        register_route(h, &audio_uris[i]);
+    }
+
     /* Before anything else is registered: a request that arrives while the
      * password store is still loading must not be served. */
     kvm_auth_register(h);

@@ -581,7 +581,7 @@ static const kvm_setting_t s_settings[] = {
         .title = "Stream HDMI audio",
         .help = "Only works once BCLK, LRCK and DATA are wired from the capture board "
                 "to the ESP32-P4.",
-        .def = 0, .requires_cap = KVM_CAP_AUDIO, .flags = KVM_SF_REBOOT,
+        .def = 0, .requires_cap = KVM_CAP_AUDIO,
     },
 
     /* ---- network -------------------------------------------------------- */
