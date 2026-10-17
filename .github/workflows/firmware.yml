@@ -39,6 +39,13 @@ jobs:
       - uses: actions/checkout@v7
       - run: components/kvm_screentext/test/run.sh
       - run: components/video_pipeline/test/run.sh
+      - run: python3 components/tc358743/test/run.py
+      - run: python3 components/kvm_web/test/test_upload_buffers.py
+      - run: sh components/kvm_web/test/run.sh
+      - run: python3 components/kvm_web/test/test_tx.py
+      - run: python3 components/kvm_web/test/test_pacing.py
+      - run: python3 components/kvm_web/test/test_memory_snapshot.py
+      - run: python3 components/kvm_net/test/test_wg_lazy.py
       # Two settings on one pin. This one guards what arrives from outside -
       # a board overlay naming a GPIO something else already holds.
       - run: components/kvm_config/test/run.sh
@@ -72,6 +79,7 @@ jobs:
         working-directory: web
       - run: npm run test
         working-directory: web
+      - run: node tools/test_video_probe.mjs
 
   # The paste tables: self-consistent (no two characters on one key), and right
   # (every character where the real layout puts it). Both are the kind of

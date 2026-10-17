@@ -74,6 +74,18 @@ class AudioCheckTests(unittest.TestCase):
                 check.validate_clip(Path('test.ts'), True, 8)
             self.assertEqual(failure.exception.details['decoded_audio']['nonzero_samples'], 0)
 
+    def test_codec_noise_does_not_prove_source_audio(self):
+        info = {'format': {'duration': '8'}, 'streams': [
+            {'codec_type': 'video', 'codec_name': 'h264'},
+            {'codec_type': 'audio', 'codec_name': 'aac', 'profile': 'LC',
+             'channels': 2, 'sample_rate': '48000'}]}
+        with patch.object(check, 'command', side_effect=[json.dumps(info).encode(), b'',
+                          struct.pack('<ffff', 1e-5, -1e-5, 1e-5, -1e-5)]):
+            with self.assertRaises(check.CheckFailed) as failure:
+                check.validate_clip(Path('test.ts'), True, 8)
+            self.assertEqual(failure.exception.details['decoded_audio']['active_samples'], 0)
+            self.assertEqual(failure.exception.details['decoded_audio']['nonzero_samples'], 4)
+
     def test_partial_settings_failure_restores_without_exposing_secrets(self):
         class Device:
             def __init__(self):

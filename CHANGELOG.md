@@ -9,6 +9,47 @@ bumps the patch).
 
 ### Fixed
 
+- Flush CPU-edited H.264 SPS/frame data before the output buffer is reused by
+  encoder DMA, preventing dirty cache lines from overwriting later frames.
+
+- Build Ethernet-only profiles when Wi-Fi credential defaults are omitted by
+  Kconfig, while keeping unavailable settings visible in the console schema.
+
+- Avoid requesting another H.264 recovery keyframe when the current frame is
+  already a keyframe. Video diagnostics now fail on an early socket close.
+
+- Add authenticated heap and task-stack diagnostics with owned task metadata
+  copied during a coordinated two-core snapshot. Report snapshot duration and
+  explicit unavailability when memory or task tracing cannot support it.
+
+- Discover Microlink and WireGuard by their real component paths so source
+  copies can build without preserving the dependency symlink.
+
+- Expose CSI frame count and frame age independently of encoder activity, and
+  report the largest free PSRAM block alongside total free memory.
+
+- Serialize writes per connection so slow video sends do not hold the control
+  connection lock. Complete short TLS writes or fail the connection, yield on
+  retries, and retain the PCM socket timeout. Keep fragments of one video
+  message together and prefer active WebSockets over idle HTTP sessions.
+
+- Negotiate a two-frame acknowledgement window with compatible video viewers;
+  ignore duplicate/stale acknowledgements and recover missing H.264 references
+  with bounded keyframe requests. Older viewers keep their existing behavior.
+
+- Allow microSD image uploads to use smaller or fewer PSRAM buffers when memory
+  is fragmented, retaining the refusal to upload during recording.
+- Allocate the classic WireGuard worker only on first enable; concurrent enable
+  requests share one worker and allocation failures can be retried.
+
+- Add H.264 SPS no-reorder signaling on both encoder paths, with bounded
+  rewriting that preserves access units when there is no room or the parameter
+  set is unsupported. Recording bitrate policy is unchanged.
+
+- Bound HDMI bridge register transfers and stop a failed timing poll after its
+  first error, preserving audio PLL recovery. Keep capture initialization alive
+  when a source starts in an oversized mode so a supported mode can recover.
+
 - Bind audio streams to their originating login session so logout, password
   changes and session revocation stop capture.
 

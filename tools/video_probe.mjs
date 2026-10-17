@@ -1,7 +1,8 @@
 /*
  * Watch the device's video channel without a browser.
  *
- *   node tools/video_probe.mjs espkvm.local 6 [out.h264]
+ *   node tools/video_probe.mjs espkvm.local 6 [out.h264] [device-ca.pem]
+ *   node tools/video_probe.mjs http://192.168.1.169 6 [out.h264]
  *
  * Prints frame type and size and, for H.264, the NAL units in each frame -
  * which is how you tell an IDR carrying its parameter sets from a P-frame.
@@ -14,7 +15,7 @@
  * wrong stride or a missed crop still decodes, it just looks wrong.
  */
 import { createRequire } from "node:module";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, readFileSync } from "node:fs";
 
 /* `ws` belongs to the console's dependencies; resolve it from there rather
  * than asking the repository root for a node_modules of its own. */
@@ -23,16 +24,30 @@ const WebSocket = require("ws");
 
 const host = process.argv[2] ?? "espkvm.local";
 const seconds = Number(process.argv[3] ?? 5);
+if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) {
+  throw new Error("duration must be greater than zero and at most 600 seconds");
+}
 const dumpPath = process.argv[4];
+const caPath = process.argv[5];
+const origin = host.includes("://") ? host : `wss://${host}`;
+const endpoint = new URL("/video", origin);
+endpoint.protocol = endpoint.protocol === "http:" ? "ws:" : endpoint.protocol === "https:" ? "wss:" : endpoint.protocol;
 
 const dump = dumpPath ? createWriteStream(dumpPath) : null;
-/* The device's certificate is self-signed, which is the point of it. */
-const ws = new WebSocket(`wss://${host}/video`, { rejectUnauthorized: false });
+/* Supply the exported device CA for certificate-verified TLS checks. The
+ * legacy no-CA mode remains useful during initial device setup. */
+const ws = new WebSocket(endpoint, {
+  handshakeTimeout: 5000,
+  ...(caPath ? { ca: readFileSync(caPath), rejectUnauthorized: true }
+    : { rejectUnauthorized: false }),
+});
 
 let frames = 0;
 let bytes = 0;
 let keyframes = 0;
 let started = 0;
+let acknowledgements = false;
+let finishing = false;
 
 /** NAL unit types in an Annex-B frame: 7 SPS, 8 PPS, 5 IDR, 1 inter-coded. */
 function nals(buf) {
@@ -56,27 +71,40 @@ ws.on("open", () => {
   ws.send(Buffer.from([1]));
   started = Date.now();
   setTimeout(() => {
+    finishing = true;
     const secs = (Date.now() - started) / 1000;
     console.log(
       `\n${frames} frames in ${secs.toFixed(1)}s = ${(frames / secs).toFixed(1)} fps, ` +
-        `${((bytes * 8) / secs / 1000).toFixed(0)} kbit/s, ${keyframes} keyframes`,
+        `${((bytes * 8) / secs / 1000).toFixed(0)} kbit/s, ${keyframes} keyframes, ACKs=${acknowledgements}`,
     );
     if (dump) {
       dump.end();
       console.log(`wrote ${dumpPath}`);
     }
     ws.close();
-    process.exit(0);
+    process.exit(frames ? 0 : 1);
   }, seconds * 1000);
 });
 
 ws.on("message", (data) => {
   const buf = Buffer.from(data);
+  if (buf.length === 1 && buf[0] === 0x85) {
+    acknowledgements = true;
+    return;
+  }
+  if (buf.length <= 12 || buf[0] !== 0x4b) return;
   const type = buf[1];
+  if (type !== 1 && type !== 2) return;
   const w = buf.readUInt16LE(2);
   const h = buf.readUInt16LE(4);
   const seq = buf.readUInt32LE(6);
   const payload = buf.subarray(12);
+  if (acknowledgements) {
+    const ack = Buffer.alloc(5);
+    ack[0] = 0x09;
+    ack.writeUInt32LE(seq, 1);
+    ws.send(ack);
+  }
   frames++;
   bytes += payload.length;
 
@@ -96,5 +124,12 @@ ws.on("message", (data) => {
 
 ws.on("error", (e) => {
   console.error("ws error:", e.message);
+  process.exit(1);
+});
+
+ws.on("close", (code) => {
+  if (finishing) return;
+  console.error(`video socket closed early (code ${code}, ${frames} frames)`);
+  if (dump) dump.end();
   process.exit(1);
 });

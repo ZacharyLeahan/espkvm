@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "video_ack.h"
+#include "lwip/tcp.h"
 #include "http_server.h"
 
 #include "sdkconfig.h" /* the CONFIG_ guards below are read before any of them */
@@ -634,7 +636,10 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
     const char *rec_blocked = rec.recording ? NULL : kvm_record_blocked();
     const char *shot_blocked = kvm_record_screenshot_blocked();
 
-    char body[1664];
+    char age[16];
+    if (st.frame_age_ms == UINT32_MAX) snprintf(age, sizeof(age), "null");
+    else snprintf(age, sizeof(age), "%u", (unsigned)st.frame_age_ms);
+    char body[1792];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"inputHz\":%u,\"tooFast\":%s,"
@@ -645,7 +650,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      /* How long the picture has been one flat colour: the shape
                         of a stop screen or a blanked output, neither of which
                         can be read as text. 0 means it is a picture. */
-                     "\"textMode\":%s,\"flatMs\":%u,"
+                     "\"textMode\":%s,\"flatMs\":%u,\"frames\":%u,\"frameAgeMs\":%s,"
                      /* The recorder rides along: the console polls this anyway. */
                      "\"record\":{\"on\":%s,\"file\":\"%s\",\"seconds\":%u,\"bytes\":%llu,"
                      "\"dropped\":%u,\"stopped\":\"%s\",\"blocked\":%s%s%s,"
@@ -665,7 +670,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      video_frame_viewer_count(), (unsigned)s_video_client_count,
                      (unsigned)s_text_client_count, s_stream_workers, codec,
                      text_mode ? "true" : "false",
-                     (unsigned)st.flat_ms, rec.recording ? "true" : "false", rec.file,
+                     (unsigned)st.flat_ms, (unsigned)st.frames, age, rec.recording ? "true" : "false", rec.file,
                      (unsigned)rec.seconds, (unsigned long long)rec.bytes, (unsigned)rec.dropped,
                      rec.stopped, rec_blocked ? "\"" : "", rec_blocked ? rec_blocked : "null",
                      rec_blocked ? "\"" : "", rec.event ? "true" : "false",
@@ -852,7 +857,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"boardId\":\"%s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
-                     "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
+                     "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,\"psramLargest\":%u,"
                      "\"internalFree\":%u,\"internalLargest\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d,\"mode\":\"%s\",\"wifiUp\":%s,"
@@ -871,6 +876,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      (unsigned long long)(esp_timer_get_time() / 1000000),
                      (unsigned)esp_get_free_heap_size(),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (int)temp_c,
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,
@@ -1506,6 +1512,7 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
  */
 #define UPLOAD_CHUNK (256 * 1024)
 #define UPLOAD_BUFS 4
+#define UPLOAD_CHUNK_MIN (32 * 1024)
 #define UPLOAD_WRITER_STACK (4 * 1024)
 
 typedef struct {
@@ -1528,6 +1535,32 @@ typedef struct {
     volatile bool failed;
     int64_t write_us;
 } upload_writer_t;
+
+/* Prefer pipelining, but keep uploads usable when capture fragments PSRAM.
+ * Every queued buffer has the same capacity; failed larger attempts are freed
+ * before retrying. The caller owns and drains the returned buffers on all exits. */
+static int upload_buffers_alloc(upload_writer_t *w, size_t *chunk)
+{
+    *chunk = UPLOAD_CHUNK;
+    int count = 0;
+    while (count < UPLOAD_BUFS) {
+        upload_buf_t b = {.data = heap_caps_aligned_alloc(64, *chunk, MALLOC_CAP_SPIRAM)};
+        if (b.data) {
+            if (xQueueSend(w->empty, &b, 0) != pdTRUE) {
+                free(b.data);
+                break;
+            }
+            count++;
+        } else if (count < 2 && *chunk > UPLOAD_CHUNK_MIN) {
+            while (xQueueReceive(w->empty, &b, 0) == pdTRUE) free(b.data);
+            count = 0;
+            *chunk /= 2;
+        } else {
+            break;
+        }
+    }
+    return count;
+}
 
 static void upload_writer_task(void *arg)
 {
@@ -1590,12 +1623,13 @@ static void upload_worker_task(void *arg)
     w.empty = xQueueCreate(UPLOAD_BUFS, sizeof(upload_buf_t));
     w.done = xSemaphoreCreateBinary();
     ok = w.full && w.empty && w.done;
-    for (int i = 0; ok && i < UPLOAD_BUFS; i++) {
-        upload_buf_t b = {.data = heap_caps_aligned_alloc(64, UPLOAD_CHUNK, MALLOC_CAP_SPIRAM)};
-        ok = b.data != NULL;
-        if (ok) {
-            xQueueSend(w.empty, &b, 0);
-        }
+    size_t chunk = UPLOAD_CHUNK;
+    const int buffers = ok ? upload_buffers_alloc(&w, &chunk) : 0;
+    ok = ok && buffers > 0;
+    if (ok && (chunk != UPLOAD_CHUNK || buffers != UPLOAD_BUFS)) {
+        ESP_LOGW(TAG, "upload: %d buffers of %u KB (PSRAM largest %u KB)", buffers,
+                 (unsigned)(chunk / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
     }
     const bool writer = ok && xTaskCreate(upload_writer_task, "kvm_upload_wr", UPLOAD_WRITER_STACK,
                                           &w, UPLOAD_WORKER_PRIO, NULL) == pdPASS;
@@ -1610,8 +1644,8 @@ static void upload_worker_task(void *arg)
         b.len = 0; /* it comes back holding the length it was written with */
         /* Fill the buffer, or take whatever arrived before a lull. recv hands
          * back a TLS record at a time; batching them makes a few large writes. */
-        while (b.len < UPLOAD_CHUNK && received + b.len < ctx->content_len) {
-            const size_t room = UPLOAD_CHUNK - b.len;
+        while (b.len < chunk && received + b.len < ctx->content_len) {
+            const size_t room = chunk - b.len;
             const size_t left = ctx->content_len - received - b.len;
             const int n = httpd_req_recv(req, b.data + b.len, room < left ? room : left);
             if (kvm_recv_stalled(n)) {
@@ -2592,19 +2626,63 @@ static httpd_handle_t s_redirect_httpd;
  * with heap poisoning caught the jump through ssl->f_send read back as
  * 0xfefefefe, the pattern IDF fills freed memory with.
  *
- * So every send goes through ws_send_frame(), which holds s_tx_mu and checks
- * the socket is still listed. http_sess_close_cb takes the same lock to unlist
- * it, which also waits out a send already under way before the teardown
- * continues. A send is bounded by the 400 ms SO_SNDTIMEO set in
- * video_add_client(), so that wait is short.
+ * Each session has a recursive write lock; the table lock is held only while
+ * finding or unlisting it. Close waits for that session's writer before freeing
+ * its TLS context. A slow viewer cannot hold the control session's lock.
+ * TLS retries respect the socket timeout, including the shorter PCM deadline.
  *
  * The table only has to hold one server's sessions: max_open_sockets is 12
  * plain and 7 with TLS, and the port 80 redirect server has its own config
  * with neither callback.
  */
 #define TX_MAX_SOCKETS 16
-static SemaphoreHandle_t s_tx_mu;
+static SemaphoreHandle_t s_tx_mu; /* the table; held only to read or change it */
 static int s_tx_fds[TX_MAX_SOCKETS];
+/* One write lock a session, so a slow viewer holds up only its own socket. A
+ * single lock for all of them let one video frame to a slow Wi-Fi client stall
+ * the server task's pongs and replies for seconds. The generation tells a
+ * waiting sender that its session closed and the slot was reused meanwhile. */
+static SemaphoreHandle_t s_tx_slot_mu[TX_MAX_SOCKETS];
+static uint32_t s_tx_gen[TX_MAX_SOCKETS];
+
+/* Take the write lock of fd's session. Returns its slot, or -1 when the
+ * session is not listed (closed, or never opened by us). */
+static int tx_lock(int fd)
+{
+    if (!s_tx_mu || fd < 0) {
+        return -1;
+    }
+    int slot = -1;
+    uint32_t gen = 0;
+    (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
+    for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+        if (s_tx_fds[i] == fd) {
+            slot = i;
+            gen = s_tx_gen[i];
+            break;
+        }
+    }
+    xSemaphoreGiveRecursive(s_tx_mu);
+    if (slot < 0) {
+        return -1;
+    }
+    (void)xSemaphoreTakeRecursive(s_tx_slot_mu[slot], portMAX_DELAY);
+    (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
+    const bool same = s_tx_fds[slot] == fd && s_tx_gen[slot] == gen;
+    xSemaphoreGiveRecursive(s_tx_mu);
+    if (!same) {
+        xSemaphoreGiveRecursive(s_tx_slot_mu[slot]);
+        return -1;
+    }
+    return slot;
+}
+
+static void tx_unlock(int slot)
+{
+    if (slot >= 0) {
+        xSemaphoreGiveRecursive(s_tx_slot_mu[slot]);
+    }
+}
 /* The control WebSockets, which is where a notice for everybody goes. */
 static int s_ctrl_fds[TX_MAX_SOCKETS];
 
@@ -2617,7 +2695,7 @@ static void video_remove_client(int fd);
  * to send to - callers drop the client either way.
  */
 /*
- * The TLS server's send, under s_tx_mu.
+ * The TLS server's send, under its session's write lock.
  *
  * s_tx_fds only covers the sends made from our own tasks. The server writes to
  * the same sessions from its task too - the reply to a WebSocket ping or close,
@@ -2639,32 +2717,49 @@ typedef struct {
 static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_t buf_len, int flags)
 {
     (void)flags;
+    const int slot = tx_lock(sockfd);
+    if (slot < 0) return HTTPD_SOCK_ERR_FAIL;
+    /* Acquire the session lock before reading a context teardown can free. */
     const https_transport_head_t *ctx = httpd_sess_get_transport_ctx(hd, sockfd);
     if (!ctx || !ctx->tls) {
+        tx_unlock(slot);
         return HTTPD_SOCK_ERR_FAIL;
     }
-    (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
-    const ssize_t ret = esp_tls_conn_write(ctx->tls, buf, buf_len);
-    xSemaphoreGiveRecursive(s_tx_mu);
-    return (int)ret;
+    /* Respect the PCM listener's 100 ms timeout. Other sessions retain their
+     * own send timeout, capped at five seconds. Never spin on WANT_WRITE. */
+    struct timeval timeout = {0};
+    socklen_t timeout_len = sizeof(timeout);
+    int64_t budget = 5000000;
+    if (getsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, &timeout_len) == 0) {
+        const int64_t configured = (int64_t)timeout.tv_sec * 1000000 + timeout.tv_usec;
+        if (configured > 0 && configured < budget) budget = configured;
+    }
+    const int64_t deadline = esp_timer_get_time() + budget;
+    size_t done = 0;
+    while (done < buf_len && esp_timer_get_time() < deadline) {
+        const ssize_t ret = esp_tls_conn_write(ctx->tls, buf + done, buf_len - done);
+        if (ret > 0 && (size_t)ret <= buf_len - done) {
+            done += (size_t)ret;
+        } else if (ret == 0 || ret == ESP_TLS_ERR_SSL_WANT_WRITE || ret == ESP_TLS_ERR_SSL_WANT_READ) {
+            vTaskDelay(1);
+        } else {
+            break;
+        }
+    }
+    /* HTTPD's WebSocket sender does not repair a short payload write. Return
+     * only a complete write or an error, and make a partial stream unusable. */
+    if (done != buf_len) shutdown(sockfd, SHUT_RDWR);
+    tx_unlock(slot);
+    return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
 }
 
 static esp_err_t ws_send_frame(httpd_handle_t server, int fd, httpd_ws_frame_t *frame)
 {
-    if (!server || fd < 0 || !s_tx_mu) {
-        return ESP_FAIL;
-    }
-    if (xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) != pdTRUE) {
-        return ESP_FAIL;
-    }
-    esp_err_t err = ESP_ERR_INVALID_STATE; /* closed under us */
-    for (int i = 0; i < TX_MAX_SOCKETS; i++) {
-        if (s_tx_fds[i] == fd) {
-            err = httpd_ws_send_frame_async(server, fd, frame);
-            break;
-        }
-    }
-    xSemaphoreGiveRecursive(s_tx_mu);
+    if (!server || fd < 0 || !s_tx_mu) return ESP_FAIL;
+    const int slot = tx_lock(fd);
+    if (slot < 0) return ESP_ERR_INVALID_STATE;
+    const esp_err_t err = httpd_ws_send_frame_async(server, fd, frame);
+    tx_unlock(slot);
     return err;
 }
 
@@ -2682,6 +2777,8 @@ static esp_err_t ws_send_paced(httpd_handle_t server, int fd, const httpd_ws_fra
         return ws_send_frame(server, fd, &whole);
     }
 
+    const int slot = tx_lock(fd);
+    if (slot < 0) return ESP_ERR_INVALID_STATE;
     size_t off = 0;
     while (off < frame->len) {
         const size_t n = (frame->len - off < piece) ? frame->len - off : piece;
@@ -2694,6 +2791,7 @@ static esp_err_t ws_send_paced(httpd_handle_t server, int fd, const httpd_ws_fra
         };
         const esp_err_t err = ws_send_frame(server, fd, &part);
         if (err != ESP_OK) {
+            tx_unlock(slot);
             return err;
         }
         off += n;
@@ -2704,6 +2802,7 @@ static esp_err_t ws_send_paced(httpd_handle_t server, int fd, const httpd_ws_fra
             vTaskDelay(1);
         }
     }
+    tx_unlock(slot);
     return ESP_OK;
 }
 
@@ -2823,11 +2922,26 @@ static void on_hid_leds(uint8_t leds, void *user)
 /** A new session may be written to from now on. See s_tx_fds. */
 static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
 {
+    const int one = 1;
+    (void)setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    /* IDF excludes async requests (PCM/MJPEG/uploads) from LRU eviction.
+     * WebSockets are synchronous sessions, so keep them newer than idle HTTP
+     * connections when another session opens. All-active exhaustion can still
+     * evict a WebSocket; this is preference, not a reservation. */
+    size_t n = CONFIG_LWIP_MAX_SOCKETS;
+    int fds[CONFIG_LWIP_MAX_SOCKETS];
+    if (httpd_get_client_list(hd, &n, fds) == ESP_OK) {
+        for (size_t i = 0; i < n; i++) {
+            if (fds[i] != sockfd && httpd_ws_get_fd_info(hd, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+                (void)httpd_sess_update_lru_counter(hd, fds[i]);
+            }
+        }
+    }
     if (!s_tx_mu || sockfd < 0 || xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) != pdTRUE) {
         return ESP_OK;
     }
     /* On the TLS server every write to this session - ours and the server's
-     * own - now takes s_tx_mu. See locked_ssl_send. */
+     * own - now takes the session write lock. See locked_ssl_send. */
     if (httpd_sess_get_transport_ctx(hd, sockfd)) {
         (void)httpd_sess_set_send_override(hd, sockfd, locked_ssl_send);
     }
@@ -2842,6 +2956,7 @@ static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
         for (int i = 0; i < TX_MAX_SOCKETS; i++) {
             if (s_tx_fds[i] < 0) {
                 s_tx_fds[i] = sockfd;
+                s_tx_gen[i]++;
                 break;
             }
         }
@@ -2861,13 +2976,12 @@ static void http_sess_close_cb(httpd_handle_t hd, int sockfd)
      * stops the next send and waits out the one that may be running. See
      * s_tx_fds.
      */
-    if (s_tx_mu && xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY) == pdTRUE) {
-        for (int i = 0; i < TX_MAX_SOCKETS; i++) {
-            if (s_tx_fds[i] == sockfd) {
-                s_tx_fds[i] = -1;
-            }
-        }
+    const int slot = tx_lock(sockfd);
+    if (slot >= 0) {
+        (void)xSemaphoreTakeRecursive(s_tx_mu, portMAX_DELAY);
+        s_tx_fds[slot] = -1;
         xSemaphoreGiveRecursive(s_tx_mu);
+        tx_unlock(slot);
     }
 
     /*
@@ -3505,6 +3619,7 @@ static bool s_video_need_key[VIDEO_MAX_CLIENTS];
  * A half-open socket left by an unclean disconnect, or a viewer that stopped
  * reading, sits here until it is dropped - so it never gets a spinning TLS send. */
 static int s_video_stall[VIDEO_MAX_CLIENTS];
+static video_ack_t s_video_ack[VIDEO_MAX_CLIENTS];
 /*
  * A subscriber on this socket wants the screen read as characters, not encoded
  * as pictures. It is the same socket and the same table because it is the same
@@ -3559,6 +3674,7 @@ static void video_add_client(int fd, bool text)
             s_video_fds[i] = fd;
             s_video_need_key[i] = true;
             s_video_stall[i] = 0;
+            s_video_ack[i] = (video_ack_t){0};
             s_text_mode[i] = text;
             s_text_need_full[i] = text;
             /* Bound sends to this viewer. esp-tls left the socket non-blocking, so a
@@ -3600,6 +3716,7 @@ static void video_drop_client_locked(int index)
     s_video_fds[index] = -1;
     s_video_need_key[index] = false;
     s_video_stall[index] = 0;
+    s_video_ack[index] = (video_ack_t){0};
     s_text_mode[index] = false;
     s_text_need_full[index] = false;
     if (was_text) {
@@ -3881,6 +3998,18 @@ static void text_push(httpd_handle_t server)
  * wrapped in an async request handler - doing so leaves the handshake
  * unfinished and no frame ever reaches the client.
  */
+/* Ask for an IDR to repair a broken reference chain, at most every 300 ms:
+   IDRs are the biggest frames and would feed the overload they repair. */
+static void video_request_repair_idr(void)
+{
+    static int64_t s_last_us;
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us - s_last_us > 300000) {
+        s_last_us = now_us;
+        video_frame_request_keyframe();
+    }
+}
+
 static void video_pump_task(void *arg)
 {
     httpd_handle_t server = (httpd_handle_t)arg;
@@ -3931,18 +4060,15 @@ static void video_pump_task(void *arg)
          * delta breaks the decoder's reference chain and the picture shatters
          * until a keyframe. The gap says exactly when that happened: ask for an
          * IDR now and the repair arrives within a frame or two instead of at the
-         * next scheduled keyframe. Rate-limited so a sustained overload asks for
-         * keyframes at a bounded rate rather than for every dropped frame (IDRs
-         * are the biggest frames - that would feed the very overload it repairs).
+         * next scheduled keyframe.
          */
-        if (last_seq != 0 && (uint32_t)(f.seq - last_seq) > 1u &&
-            f.payload == VIDEO_PAYLOAD_H264) {
-            static int64_t s_gap_idr_us;
-            const int64_t now_us = esp_timer_get_time();
-            if (now_us - s_gap_idr_us > 300000) {
-                s_gap_idr_us = now_us;
-                video_frame_request_keyframe();
-            }
+        /* An IDR already repairs every skipped reference. Asking for another
+         * while sending this large frame creates a needless IDR cascade. */
+        const bool reference_gap = !f.keyframe && last_seq != 0 &&
+                                   (uint32_t)(f.seq - last_seq) > 1u &&
+                                   f.payload == VIDEO_PAYLOAD_H264;
+        if (reference_gap) {
+            video_request_repair_idr();
         }
         last_seq = f.seq;
 
@@ -3975,6 +4101,7 @@ static void video_pump_task(void *arg)
         memcpy(packet + VIDEO_HDR_LEN, f.data, f.len);
         const size_t packet_len = VIDEO_HDR_LEN + f.len;
         const bool keyframe = f.keyframe;
+        const int f_payload = f.payload;
         video_frame_release(&f);
 
         httpd_ws_frame_t frame = {
@@ -3993,6 +4120,7 @@ static void video_pump_task(void *arg)
          */
         int targets[VIDEO_MAX_CLIENTS];
         int target_count = 0;
+        bool repair = false;
         if (xSemaphoreTake(s_video_mu, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -4004,8 +4132,16 @@ static void video_pump_task(void *arg)
             if (s_text_mode[i]) {
                 continue; /* reading the screen, not watching it */
             }
+            if (reference_gap) s_video_need_key[i] = true;
             if (s_video_need_key[i] && !keyframe) {
-                continue; /* still waiting for its first decodable frame */
+                continue; /* a missing reference must be repaired before more deltas */
+            }
+            if (video_ack_blocked(&s_video_ack[i], esp_timer_get_time())) {
+                if (f_payload == VIDEO_PAYLOAD_H264 && !s_video_need_key[i]) {
+                    s_video_need_key[i] = true;
+                    repair = true;
+                }
+                continue;
             }
             /*
              * Only send to a client that can take the frame now. A viewer whose TCP
@@ -4024,14 +4160,24 @@ static void video_pump_task(void *arg)
             if (select(fd + 1, NULL, &wfds, NULL, &tv0) <= 0 || !FD_ISSET(fd, &wfds)) {
                 if (++s_video_stall[i] >= VIDEO_STALL_DROP_FRAMES) {
                     video_drop_client_locked(i);
+                } else if (f_payload == VIDEO_PAYLOAD_H264 && !s_video_need_key[i]) {
+                    /* This viewer misses a frame its decoder needs: hold its
+                       deltas until a keyframe, and ask for one. A slow Wi-Fi
+                       link hit this every few seconds. */
+                    s_video_need_key[i] = true;
+                    repair = true;
                 }
                 continue;
             }
             s_video_stall[i] = 0;
             s_video_need_key[i] = false; /* decodable frame (a keyframe if it was waiting) */
+            video_ack_sent(&s_video_ack[i], last_seq, esp_timer_get_time());
             targets[target_count++] = fd;
         }
         xSemaphoreGive(s_video_mu);
+        if (repair) {
+            video_request_repair_idr();
+        }
 
         for (int i = 0; i < target_count; i++) {
             const int64_t send_t0 = esp_timer_get_time();
@@ -4046,6 +4192,9 @@ static void video_pump_task(void *arg)
                 /* A viewer that has gone stops being counted, which is also
                  * what lets the encoder go idle again. */
                 video_remove_client(targets[i]);
+                /* A partial fragmented message cannot be followed by another
+                 * data message safely. End the session instead of reusing it. */
+                (void)httpd_sess_trigger_close(server, targets[i]);
             }
         }
     }
@@ -4109,6 +4258,18 @@ static esp_err_t ws_pre_handshake(httpd_req_t *req)
     return ESP_OK;
 }
 
+static void video_client_acked(int fd, uint32_t seq)
+{
+    if (!s_video_mu || xSemaphoreTake(s_video_mu, portMAX_DELAY) != pdTRUE) return;
+    for (int i = 0; i < VIDEO_MAX_CLIENTS; i++) {
+        if (s_video_fds[i] == fd && !s_text_mode[i]) {
+            (void)video_ack_received(&s_video_ack[i], seq);
+            break;
+        }
+    }
+    xSemaphoreGive(s_video_mu);
+}
+
 static esp_err_t video_ws_handler(httpd_req_t *req)
 {
     /* Only frames reach here; the handshake was answered, and authenticated,
@@ -4134,11 +4295,21 @@ static esp_err_t video_ws_handler(httpd_req_t *req)
      * have to guess.
      */
     uint8_t hello[8] = {0};
+    if (pkt.type != HTTPD_WS_TYPE_BINARY) return ESP_OK;
+    if (pkt.len > sizeof(hello)) return ESP_FAIL;
     if (pkt.len) {
         pkt.payload = hello;
-        (void)httpd_ws_recv_frame(req, &pkt, sizeof(hello));
+        err = httpd_ws_recv_frame(req, &pkt, sizeof(hello));
+        if (err != ESP_OK) return err;
     }
     const int fd = httpd_req_to_sockfd(req);
+    if (pkt.len && hello[0] == 0x09) { /* negotiated frame ACK */
+        if (pkt.len != 5) return ESP_FAIL;
+        const uint32_t seq = (uint32_t)hello[1] | ((uint32_t)hello[2] << 8) |
+                             ((uint32_t)hello[3] << 16) | ((uint32_t)hello[4] << 24);
+        video_client_acked(fd, seq);
+        return ESP_OK;
+    }
     /*
      * A second message from a client that is already watching asks for a
      * keyframe. The console needs that when its own decoder has lost the
@@ -4155,7 +4326,12 @@ static esp_err_t video_ws_handler(httpd_req_t *req)
         video_frame_request_keyframe();
         return ESP_OK;
     }
-    video_add_client(fd, hello[0] == WS_SUBSCRIBE_TEXT);
+    const bool text = hello[0] == WS_SUBSCRIBE_TEXT;
+    video_add_client(fd, text);
+    if (!text && video_client_watches_picture(fd)) {
+        const uint8_t ack_support = 0x85;
+        ws_send_binary(fd, &ack_support, 1);
+    }
     return ESP_OK;
 }
 
@@ -4442,8 +4618,17 @@ httpd_handle_t http_server_start(void)
         for (int i = 0; i < TX_MAX_SOCKETS; i++) {
             s_tx_fds[i] = -1;
         }
-        s_tx_mu = xSemaphoreCreateRecursiveMutex();
+        bool slots = true;
+        for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+            s_tx_slot_mu[i] = xSemaphoreCreateRecursiveMutex();
+            if (!s_tx_slot_mu[i]) { slots = false; break; }
+        }
+        s_tx_mu = slots ? xSemaphoreCreateRecursiveMutex() : NULL;
         if (!s_tx_mu) {
+            for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+                if (s_tx_slot_mu[i]) vSemaphoreDelete(s_tx_slot_mu[i]);
+                s_tx_slot_mu[i] = NULL;
+            }
             /* Without it every send would be racing the session teardown. */
             ESP_LOGE(TAG, "tx mutex");
             return NULL;
@@ -4685,6 +4870,10 @@ httpd_handle_t http_server_start(void)
     for (size_t i = 0; i < n_record; i++) {
         register_route(h, &record_uris[i]);
     }
+
+    size_t n_memory = 0;
+    const httpd_uri_t *memory_uris = memory_api_routes(&n_memory);
+    for (size_t i = 0; i < n_memory; i++) register_route(h, &memory_uris[i]);
 
     size_t n_audio = 0;
     const httpd_uri_t *audio_uris = audio_api_routes(&n_audio);

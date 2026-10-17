@@ -173,8 +173,8 @@ def validate_clip(clip, expect_audio, seconds):
         levels = decoded_levels(pcm, a['channels'])
         result['decoded_audio'] = dict(levels, rate=int(a['sample_rate']),
                                        seconds=levels['frames'] / int(a['sample_rate']))
-        if not levels['frames'] or not levels['nonzero_samples']:
-            raise CheckFailed('Decoded audio is empty or entirely silent', result)
+        if not levels['frames'] or not levels['active_samples']:
+            raise CheckFailed('Decoded audio has no samples above the activity threshold', result)
         if 'start_time' in a and 'start_time' in video[0]:
             result['audio_minus_video_start_seconds'] = float(a['start_time']) - float(video[0]['start_time'])
         packets = json.loads(command('ffprobe', '-v', 'error', '-select_streams', 'a:0',

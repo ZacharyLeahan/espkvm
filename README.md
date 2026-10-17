@@ -4,6 +4,11 @@
 
 The maintained Xbox branch is [`main`](https://github.com/ZacharyLeahan/espkvm-xbox/tree/main). Feature branches hold work under review; the `upstream` remote tracks the original ESP-KVM project, including `upstream/main`. We review upstream changes selectively in the [adaptation ledger](docs/UPSTREAM-REVIEW.md).
 
+The `upstream-reliability-xbox` review branch adapts bridge recovery, settings,
+video delivery, Microlink reliability and memory diagnostics. Its published
+console/Microlink pins are reproducible, but combined-device acceptance is still
+in progress; see the [current validation ledger](docs/UPSTREAM-REVIEW.md).
+
 ## What works
 
 - **Video:** 480p and 720p Xbox HDMI capture, LAN/Tailscale viewing, and optional 640×480 touchscreen preview. The 720p picture is scaled to 640×360 on the LCD.

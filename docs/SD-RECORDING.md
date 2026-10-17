@@ -33,6 +33,28 @@ capture/queue diagnostics, not proof of perceptual synchronization or sound qual
 Keep private firmware backups and credentials out of published evidence. Do not
 format the card for a test.
 
+## H.264 cache correction (2026-10-17)
+
+The reliability branch now flushes CPU-edited SPS/keyframe data before the
+hardware encoder reuses that output buffer. This removes a cache-coherency
+hazard that could corrupt later frames without increasing recorder drop counts.
+It is a plausible cause of the earlier video error, not a deterministic diagnosis.
+See the [cache correction and repeated hardware results](UPSTREAM-REVIEW.md#h264-output-cache-correction-2026-10-17).
+Recorder drop counters measure queue/reference loss; strict decoding of the
+saved file remains necessary to check bitstream integrity.
+
+## Reliability-branch movie check (2026-10-17)
+
+On the combined upstream-adaptation image, two 30-second movie recordings
+passed strict H.264 and AAC decoding: one SD-only and one with parallel network
+PCM. Both saved active stereo 48 kHz audio. The parallel repeat saved
+`VIDEO/up-000430.ts`, with 30.0373 seconds of AAC and zero reported queue drops.
+An earlier parallel trial saved valid audio but failed strict video decoding
+with an H.264 macroblock error, despite zero reported drops. That intermittent
+video issue remains open; passing repeats do not establish its cause.
+See the [upstream ledger](UPSTREAM-REVIEW.md#audible-movie-validation-2026-10-17)
+for all three trials and their measured limits. Settings were restored after each.
+
 ## Hardware verification (2026-10-16)
 
 Installed on Function EV P4 rev 3.2 with C790, 48 kHz/32-bit-slot I2S,
