@@ -265,6 +265,36 @@ suspension is per-core; retaining TCB/name pointers across an unlocked interval
 needs an explicit lifetime solution before adapting upstream's task table.
 No device firmware, C6 or SD contents were changed during this verification.
 
+## Heap/task diagnostic adaptation (2026-10-16)
+
+Implementation: [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04), adapting the memory endpoint from `e14b7ca`.
+Companion contract: [60949e4](https://github.com/ZacharyLeahan/espkvm-skills-xbox/commit/60949e49c6dba9dbf6f775424bb9918813e5b976).
+This supersedes the outstanding source-implementation status for heap/stack
+diagnostics; integrated device validation remains open.
+
+- Authenticated `GET /api/v1/system/memory` returns internal/DMA/PSRAM heap
+  totals, free/largest/minimum free bytes and block counts, plus named task
+  priorities, stack location/range and minimum free stack bytes. `internalStacks`
+  totals usable internal stack ranges; it does not include all task overhead.
+- Unlike the upstream snapshot, a short-lived pinned worker coordinates both
+  schedulers through the other core's IPC task, copies names/stack metadata into
+  owned storage, then resumes before JSON or network output. No task pointers
+  are dereferenced after resume. Task tracing is enabled; no runtime-stat timer
+  or blanket task-stack reduction is introduced.
+- Collection is bounded to 128 tasks and reports JSON 503 for unsupported tracing,
+  allocation failure, IPC failure or insufficient snapshot capacity. It includes
+  its temporary `kvm_mem` task; `snapshotUs` measures the local task-copy interval,
+  not all IPC/HTTP time. Heap and stack samples are not simultaneous. Use it for
+  occasional diagnostics, not rapid polling.
+- A two-thread production-function test passed with address/undefined sanitizers:
+  both schedulers are paused during metadata access, copied names outlive source
+  changes, and task-capacity/IPC failures restore scheduling. CI includes the test.
+  The audio-enabled tracing build passed; only previously identified Microlink
+  unused-symbol warnings appeared in the full rebuild.
+- Device measurements of snapshot cost, repeated collection under PCM/AAC/video,
+  low-memory HTTP errors and authentication still remain. This commit is not
+  evidence of live safety/performance and has not been flashed or pushed.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
