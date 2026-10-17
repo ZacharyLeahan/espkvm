@@ -62,17 +62,16 @@ inventory decisions farther down retain the original rationale and source URLs.
 | --- | --- | --- |
 | HDMI bridge recovery | Adapted in [8d94230](https://github.com/ZacharyLeahan/espkvm-xbox/commit/8d942304e8631b0ca37bf34e76d7e7e5fab61979): bounded I2C, failed reads and capped boot recovery, preserving HDMI audio PLL corrections. | Host failure tests/build passed previously; physical reconnects and oversized-to-supported mode changes with SD audio remain unverified. |
 | Settings and build paths | Console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07); firmware [daffe2c](https://github.com/ZacharyLeahan/espkvm-xbox/commit/daffe2c2f4872db3b61aa3be9a4163f4741d0541). Safe drafts, grouping, initial section, card wording and explicit component paths are implemented. | Console tests/typecheck and source-copy build passed previously; first-open selection and grouping were checked in the browser; delayed-save interaction remains. Parent console pin is published. |
-| Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks and both encode-path builds passed. Four post-cache-fix one-minute H.264/AAC recordings decoded with active network PCM; one also carried live video. Video-only recording and host AAC-preserving MP4 conversion passed. Authenticated HTTPS/WebCodecs, slow-viewer recovery, longer endurance and physical A/V delay remain. The earlier intermittent corruption is not deterministically attributed; see the cache correction below. |
+| Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks and both encode-path builds passed. Four post-cache-fix one-minute clips and a ten-minute combined video/PCM/SD run decoded cleanly. Live video remains about 4.2 fps and network PCM had a sample-duration shortfall; see the extended test below. Video-only recording and host AAC-preserving MP4 conversion passed. Authenticated HTTPS/WebCodecs, slow-viewer recovery, longer endurance and physical A/V delay remain. The earlier intermittent corruption is not deterministically attributed; see the cache correction below. |
 | Microlink reliability | Six source-attributed cherry-picks plus reconnect/path adaptation [d3210a0](https://github.com/ZacharyLeahan/microlink/commit/d3210a0523766d6917706aa643750082f61d49f8); exact sources and boundaries are recorded below. | Host checks/build passed previously; direct discovery and tailnet HTTP passed; relay, peer reboot, clock sync and repeated TLS failures remain. Parent dependency pin is published. |
-| Memory and diagnostics | Upload fallback/lazy WireGuard [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67), freshness [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), heap/task endpoint [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04). | Host checks/build passed previously; short snapshot/load and live upload checks passed; worst-case memory behavior remains unverified. API skill is published; upstream MCP remains an explicitly recorded access gap. |
+| Memory and diagnostics | Upload fallback/lazy WireGuard [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67), freshness [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), heap/task endpoint [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04). | Host checks/build passed previously; live upload checks and a ten-minute combined-load memory sample passed without progressive loss; worst-case allocation behavior remains unverified. API skill is published; upstream MCP remains an explicitly recorded access gap. |
 
 **All five areas are implemented.** Their integration is tracked in
-[PR #3](https://github.com/ZacharyLeahan/espkvm-xbox/pull/3); the user approved
-merging on 2026-10-17. This is implementation acceptance, not a claim that every
+[PR #3](https://github.com/ZacharyLeahan/espkvm-xbox/pull/3); it merged into `main` on 2026-10-17 as `45eaf61`. This is implementation acceptance, not a claim that every
 hardware scenario is verified. Parent pins reference console `a258024` and
 Microlink `d3210a0`; the generated bundle is committed, and the API skill branch
-is published at `60949e4`. The full matrix for the final cache correction was
-still running at this update; local Xbox, Ethernet and revision-3 builds passed.
+is published at `60949e4`. The merged-main matrix passed all 26 test/build jobs; local Xbox, Ethernet
+and revision-3 builds also passed.
 
 ### Next tests that close acceptance gaps
 
@@ -113,6 +112,46 @@ No newly discovered upstream change requires immediate adoption.
 This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
+
+## Ten-minute combined streaming/recording test (2026-10-17)
+
+The cache-corrected Xbox image completed a continuous 600-second movie recording
+with network PCM active throughout and a 590-second H.264 WebSocket viewer.
+No firmware changes or physical reconnects were made during this run.
+
+| Measurement | Result |
+| --- | --- |
+| Saved microSD clip | `VIDEO/up-001362.ts`, 145,814,680 bytes, 7,580 video frames (about 12.6 fps). |
+| Strict decode | Both 1280x720 H.264 and stereo 48 kHz AAC passed `ffmpeg -xerror`. |
+| Saved audio | 28,803,072 decoded frames, 600.064 s, RMS 0.01428, peak 0.54922; 43,339,699 active samples. |
+| Recorder counters | Zero video/audio drops; 199 inserted silence/padding frames. |
+| Container timing | Track starts match; AAC packet gaps within 1 microsecond rounding. This is not a physical lip-sync measurement. |
+| Live video | 2,504 frames in 590.0 s, 4.2 fps, 590 kbit/s, 541 keyframes; ACKs negotiated, no early disconnect. |
+| Live audio | Connection lasted 600.017 s; 596.760 s of PCM, 24,044,062 active frames. The 3.257 s sample-duration shortfall includes opening/startup timing and possible delivery gaps; no lossless-delivery or physical-latency claim. |
+| Memory | Ten active-load samples: internal free 44,391..52,587 bytes, PSRAM free 12,675,444..12,703,808 bytes, 44 tasks. No progressive decline observed. After stopping: 91,355 internal bytes, 16,678,764 PSRAM bytes and 40 tasks. Internal lifetime low-water mark was 43,488 bytes. |
+| Audio capture midpoint | Fresh samples (7 ms age), zero reported I2S overruns. This is distinct from network delivery loss. |
+
+The owned recorder stopped on its 600-second limit and the helper verified
+restoration of the original video settings. Media remains local and on the card.
+Local evidence: `/tmp/espkvm-soak-10min-01/result.json`,
+`/tmp/espkvm-soak-memory-10min-01.json`, and
+`/tmp/espkvm-soak-video-10min-01.log`. Saved TS SHA-256:
+`87fa3d9d9ac7ca21ca2649a056ca1909d39312d350f8d087513153f8676bafbb`.
+
+The bounded recording and PCM tools now accept 1..600 seconds (PCM also accepts
+fractional positive durations), with downloads capped at 512 MiB. All ten
+existing helper tests pass. The merged-main CI run
+[39031261932](https://github.com/ZacharyLeahan/espkvm-xbox/actions/runs/39031261932)
+completed successfully on `45eaf61`: all 26 test/build jobs passed.
+
+This closes the ten-minute combined recording/decode and short memory-stability
+checks. It does not establish hours-long endurance, lossless network audio,
+higher live frame rate, authenticated HTTPS/WebCodecs, physical HDMI recovery,
+Tailscale relay recovery or measured A/V delay. The original corruption has not
+recurred in the four one-minute trials plus this ten-minute run; its exact
+attribution remains non-deterministic. Next useful investigations are live-audio
+sample continuity and slow-viewer/keyframe recovery, followed by authenticated
+HTTPS and physical HDMI transitions.
 
 ## Combined-device validation checkpoint (2026-10-16)
 
