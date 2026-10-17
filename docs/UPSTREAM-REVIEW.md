@@ -113,6 +113,70 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## Sender task-state sampling (2026-10-17)
+
+[PR #5](https://github.com/ZacharyLeahan/espkvm-xbox/pull/5) merged as
+`b2d672e` after all checks passed. Follow-up implementation
+[ca129ef](https://github.com/ZacharyLeahan/espkvm-xbox/commit/ca129ef1e31ccffac5ac77f63ea03c24c5a5bd6a) adds an opt-in
+`CONFIG_KVM_AUDIO_TASK_SAMPLING` observer samples the PCM sender inside socket
+writes. It defaults off; no REST shape, capture queue or playback policy changes.
+The experimental device build used 100 Hz FreeRTOS ticks, a priority-7 observer
+and the existing priority-6 sender, 40 ms PCM queue and 8192-byte TCP send buffer.
+Video clients and recording were stopped for these two 60-second observations.
+
+| Trial | PCM received | Confirmed gaps | Longest successful send | Successful-write samples: blocked / runnable / other | Maximum poll interval |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 59.570 s / 60.008 s wall | 410 ms | 153.502 ms | 57 / 1 / 0 | 11.942 ms |
+| 2 | 59.645 s / 60.003 s wall | 335 ms | 190.252 ms | 70 / 3830 / 0 | 11.328 ms |
+
+Both streams ended normally from the observer's perspective; firmware reports
+`pcm_send` when a later write sees the closed client. Trial 1's final failed
+send took 1.304 s, excluded from successful-send maxima and sample counts above.
+Capture epochs did not reset. The source remained effectively silent: zero
+active frames in trial 1 and one transient frame in trial 2, so the helper's
+`sound_detected` label for trial 2 is not sustained audible-content validation.
+A premature overlapping second-listener attempt returned HTTPError; it was
+retried only after the first listener completed, and is not one of these trials.
+
+Blocked states demonstrate waits inside the send path. Runnable includes ready
+and running states, and these tick-aligned samples are strongly sensitive to
+phase and observer preemption; the sharply different counts cannot be read as
+CPU-time percentages. Plain HTTP uses blocking lwIP `send()` in this SDK, so
+network-buffer/TCP-IP worker waits remain candidates, not proven Wi-Fi loss.
+Sampling itself adds overhead. A precise scheduling-versus-network attribution
+and an audible combined-load acceptance test remain open. Raw WAVs and logs
+remain local as `/tmp/espkvm-sampling-audio-01.*` and `-02.*`.
+
+### Temporary send-buffer comparison
+
+Two more isolated 60-second trials doubled `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`
+from 8192 to 16384 bytes with the same sampler enabled. No video clients or
+recording were present at either boundary of either trial. The SDK's Kconfig
+help advertises `TCP_SNDBUF`, but its socket implementation does not expose
+that option (`SO_SNDBUF` is marked unimplemented), so this was a temporary
+firmware-wide setting, not a per-audio-socket tuning change.
+
+| Trial | PCM received / wall time | Confirmed gaps | Longest successful send | Successful-write blocked / runnable / other |
+| --- | --- | --- | --- | --- |
+| 16 KB, 1 | 59.710 / 60.004 s | 270 ms | 152.723 ms | 38 / 20 / 0 |
+| 16 KB, 2 | 59.695 / 60.008 s | 285 ms | 152.505 ms | 92 / 3659 / 0 |
+
+**Rejected as a production change:** queue gaps and roughly 153 ms send stalls
+remain. These two trials have somewhat smaller gaps than this session's 8 KB
+trials, but overlap the variability of earlier isolated tests and do not prove
+a repeatable benefit. Extra queued TCP data can also increase latency; physical
+delay was not measured. Source activity was again zero/one transient frame,
+not audible moving content. There were no capture epoch changes. Logs and
+metrics remain local in `/tmp/espkvm-buffer-trials-01/`. The first launch before
+the device finished booting timed out without starting a trial; the completed
+retry supplied the table above.
+
+Enabled and disabled builds passed, with only existing Microlink dependency
+warnings. All 11 observation/recording helper tests passed. The restored build
+uses the original 8192-byte buffer and disables task sampling; the normal image
+contains existing delivery counters but excludes the sampler's log strings.
+Longer combined tests with sustained audible moving content remain pending.
+
 ## Isolated audio workload comparison (2026-10-17)
 
 Two 60-second passes isolated live PCM alone, PCM plus one H.264 viewer, and
