@@ -7,6 +7,7 @@ s = (Path(__file__).resolve().parents[1] / 'http_server.c').read_text()
 a = s.index('static int tx_lock('); b = s.index('/* The control WebSockets', a)
 c = s.index('static int locked_ssl_send('); d = s.index('static esp_err_t ws_send_frame', c)
 harness = r'''
+#define _DARWIN_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <errno.h>
@@ -68,7 +69,7 @@ static ssize_t esp_tls_conn_write(void *tls, const char *buf, size_t len) {
 static int send_errno;
 static int64_t send_elapsed;
 static ssize_t mock_send(int fd, const char *buf, size_t len, int flags) {
-    assert(fd == 10 && flags == 0 && buf == expected + offset && len == 6 - offset);
+    assert(fd == 10 && flags == MSG_DONTWAIT && buf == expected + offset && len == 6 - offset);
     writes++; now += send_elapsed;
     ssize_t r = next < count ? results[next++] : -1;
     if (r > 0) offset += (size_t)r;
@@ -123,15 +124,17 @@ int main(void) {
     assert(writes == 2 && offset == 6 && shut == 0);
     reset(); results[0] = 2; count = 1;
     assert(locked_http_send(NULL,10,expected,6,0) == -1);
-    assert(writes == 2 && offset == 2 && shut == 1 && yields == 0);
+    assert(writes == 11 && offset == 2 && shut == 1 && yields == 10);
     reset(); results[0] = 0; count = 1;
     assert(locked_http_send(NULL,10,expected,6,0) == -1 && shut == 1);
     reset(); send_errno = EINTR; results[0] = -1; results[1] = 6; count = 2;
     assert(locked_http_send(NULL,10,expected,6,0) == 6 && yields == 1);
     reset(); send_errno = EPIPE;
     assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
+    reset(); results[0] = 2; results[1] = -1; results[2] = 4; count = 3;
+    assert(locked_http_send(NULL,10,expected,6,0) == 6 && writes == 3 && yields == 1);
     reset(); send_elapsed = 100000; results[0] = 2; results[1] = 4; count = 2;
-    assert(locked_http_send(NULL,10,expected,6,0) == 6 && writes == 2 && shut == 0);
+    assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
     reset(); send_elapsed = 5000000; results[0] = 2; results[1] = 4; count = 2;
     assert(locked_http_send(NULL,10,expected,6,0) == -1 && writes == 1 && shut == 1);
     reset(); s_tx_fds[0] = -1;

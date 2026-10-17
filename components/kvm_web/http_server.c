@@ -2725,7 +2725,7 @@ static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_
         tx_unlock(slot);
         return HTTPD_SOCK_ERR_FAIL;
     }
-    /* Respect the PCM listener's 100 ms timeout. Other sessions retain their
+    /* Respect the PCM listener's 250 ms timeout. Other sessions retain their
      * own send timeout, capped at five seconds. Never spin on WANT_WRITE. */
     struct timeval timeout = {0};
     socklen_t timeout_len = sizeof(timeout);
@@ -2761,22 +2761,26 @@ static int locked_http_send(httpd_handle_t hd, int sockfd, const char *buf, size
     (void)hd;
     const int slot = tx_lock(sockfd);
     if (slot < 0) return HTTPD_SOCK_ERR_FAIL;
-    /* send() retains SO_SNDTIMEO for each blocking call, including PCM's
-     * 100 ms timeout. A short successful write may already consume that time;
-     * do not turn it into a failure before the remaining bytes can be sent.
-     * This outer bound only prevents endless progress/interruption retries. */
-    const int64_t deadline = esp_timer_get_time() + 5000000;
+    /* Blocking lwIP writes recheck SO_SNDTIMEO only on ACK/poll callbacks;
+     * the netconn poll can be a second apart. Nonblocking attempts let this
+     * task enforce the configured deadline without waiting for that poll. */
+    struct timeval timeout = {0};
+    socklen_t timeout_len = sizeof(timeout);
+    int64_t budget = 5000000;
+    if (getsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, &timeout_len) == 0) {
+        const int64_t configured = (int64_t)timeout.tv_sec * 1000000 + timeout.tv_usec;
+        if (configured > 0 && configured < budget) budget = configured;
+    }
+    const int64_t deadline = esp_timer_get_time() + budget;
     size_t done = 0;
     int failure_errno = 0;
     while (done < buf_len && esp_timer_get_time() < deadline) {
-        const ssize_t ret = send(sockfd, buf + done, buf_len - done, flags);
+        const ssize_t ret = send(sockfd, buf + done, buf_len - done, flags | MSG_DONTWAIT);
         if (ret > 0 && (size_t)ret <= buf_len - done) {
             done += (size_t)ret;
-        } else if (ret < 0 && errno == EINTR) {
+        } else if (ret < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
             vTaskDelay(1);
         } else {
-            /* EAGAIN/EWOULDBLOCK is the blocking socket's send timeout.
-             * Do not renew that timeout by retrying the same stalled write. */
             failure_errno = ret < 0 ? errno : 0;
             break;
         }

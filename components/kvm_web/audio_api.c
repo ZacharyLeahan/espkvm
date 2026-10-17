@@ -80,7 +80,8 @@ static void stream_task(void *arg)
     kvm_audio_block_t *block = heap_caps_malloc(sizeof(*block), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     int fd = httpd_req_to_sockfd(req);
     int nodelay = 1;
-    struct timeval timeout = {.tv_sec = 0, .tv_usec = 100000};
+    // Allow a brief network stall to recover without enlarging the PCM queue.
+    struct timeval timeout = {.tv_sec = 0, .tv_usec = 250000};
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     char headers[256];

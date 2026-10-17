@@ -175,7 +175,10 @@ Mbit/s before HTTP/TCP/TLS overhead). Browser playback stays PCM. MicroSD record
 buffers hold about 40 ms total; the worker reads roughly 5 ms at a time. At 48 kHz, each 960-byte PCM block
 fits one TCP packet. CPU-side working buffers live in PSRAM. A
 separate asynchronous HTTP task keeps audio reads out of the HTTP server loop.
-TCP_NODELAY avoids Nagle delay; sends have a 100 ms socket timeout. A DMA
+TCP_NODELAY avoids Nagle delay; sends have a 250 ms socket timeout. Plain HTTP
+uses nonblocking attempts with a yield between retries to avoid lwIP blocking
+write timeout overshoot. This is a stall budget, not a fixed playback buffer;
+scheduling and lock contention can still extend elapsed time. A DMA
 overrun discards the affected block and resets capture to fresh samples. Network backpressure drops stale browser-queue blocks or closes that connection; it does not reset the recorder.
 The browser independently discards stale bursts. P4 SDIO transfer buffers honor
 the configured PSRAM preference with cache-aligned allocations and an internal

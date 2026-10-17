@@ -113,6 +113,79 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## Nonblocking HTTP deadline experiment (2026-10-17)
+
+This follow-up supersedes the blocking-write policy in the historical section
+below. The local ESP-IDF lwIP dependency at `c6f2f878e7b0f86033214b85547d579be43351e3`
+checks blocked netconn write timeouts from ACK/poll callbacks
+(`src/api/api_msg.c`, `lwip_netconn_do_writemore`). Its TCP poll interval is two
+500 ms slow ticks. A 100 ms SO_SNDTIMEO therefore does not guarantee a 100 ms
+return when the send queue stalls. This explains a possible timeout overshoot;
+it does not establish the underlying cause of network backpressure.
+
+The fork wrapper now uses MSG_DONTWAIT, retries partial writes and transient
+EINTR/EAGAIN with a one-tick yield, and closes an incomplete stream at its socket
+budget (capped at five seconds). PCM uses 250 ms, preserving the 40 ms browser
+producer queue, TCP_NODELAY and recorder path. TLS retains its existing loop,
+with the changed PCM socket budget. Lock acquisition/scheduling are not hard
+real-time bounded. No REST shape, authentication or media format changed.
+
+- At 100 ms, the 120-second combined test still lost PCM near 87 seconds, but
+  the failed send took 110.360 ms instead of the previous 1.158 seconds.
+  Confirmed live gaps were 420 ms. Video completed 1,111 frames/110 seconds;
+  the 30,331,920-byte microSD file strictly decoded H.264 and stereo 48 kHz AAC,
+  with zero recorder queue drops and 489 inserted silence frames. Overall
+  acceptance failed because network audio ended early.
+- At 250 ms, the 180-second combined check passed. Network audio delivered
+  179.210 seconds in 180.002 seconds, with sound detected. Video completed
+  1,600 frames/170 seconds (9.4 fps, 1,125 kbit/s, 96 keyframes, ACKs enabled).
+  The final timed-out send (259.649 ms) occurred at client shutdown; the client
+  completed its full duration. Maximum successful send was 118.966 ms.
+  Capture overruns and recorder queue drops were zero. The microSD file
+  `VIDEO/up-000031-3.ts` strictly decoded both tracks: 179.968 seconds of AAC,
+  93 silence frames (1.94 ms), SHA-256
+  `b0fb5e21b06921a472be804b6044905e798fd27029b9811efcbe430af626de50`.
+  This establishes short-run connection survival, not gap-free audio or
+  measured physical A/V synchronization.
+
+- The attempted 600-second repeat failed early: PCM sent 1,229,040 frames
+  (25.605 seconds), then timed out with 512/960 bytes written. Confirmed gaps
+  were 17,520 frames (365 ms), maximum successful send 170.995 ms, failed send
+  260.348 ms, and capture epochs/overruns zero. Thus the three-minute pass was
+  not repeatable acceptance. The owned recording was stopped at about 108
+  seconds and the video probe terminated; neither is a ten-minute pass.
+  Recorder counters showed 1,417 video frames, zero video/audio queue drops
+  and 532 inserted silence frames. The saved 108.053-second H.264/AAC file
+  strictly decoded, SHA-256
+  `fb60deabf0a129079644def625610a7097f1de7d1ad80ba1f3e1c127a1dfab8d`.
+  Settings restored successfully. Evidence: `/tmp/espkvm-nonblocking-250-long`.
+
+A subsequent 120-second audio-only TCP trace completed with 119.430 seconds
+received, 550 ms device-reported gaps and a 220.884 ms maximum successful send.
+The receiver trace contained 23,913 data packets, no repeated/out-of-order
+sequence ranges and a minimum raw advertised receive window of 65,535.
+At the longest pause, a 960-byte block split into 512 + 448 bytes with
+212.116 ms between arrivals; the first part was acknowledged locally after
+70 microseconds. Another adjacent split paused 210.112 ms. Thus receiver
+window exhaustion or a locally delayed ACK was not visible at those stalls.
+This receiver-side observation cannot prove when the ESP received the ACK,
+or distinguish Wi-Fi loss/queuing from device-side allocation/scheduling.
+The capture reported zero kernel drops; only textual packet summaries were
+saved locally (`/tmp/espkvm-tcp-audio`), with no raw packet file published.
+The observation client completed normally; the capture wrapper's initial stop
+missed the privileged child, which was then explicitly stopped and verified.
+
+Retain this as a draft transport experiment: nonblocking retries improve
+control of stalled writes but do not resolve PCM continuity. Do not merge on
+this evidence. The next investigation should correlate TCP retransmissions,
+receiver window/ACK timing and device send stalls, rather than continuing to
+increase deadlines. HTTPS, subjective listening and physical latency remain
+unverified.
+
+Production-function host TX and WebSocket pacing tests passed, as did the
+Function EV app build without compiler warnings. Raw movie captures/logs remain
+local under `/tmp/espkvm-nonblocking-01` and `/tmp/espkvm-nonblocking-250`.
+
 ## Plain HTTP complete-write handling (2026-10-17)
 
 Fork implementation: [3585933](https://github.com/ZacharyLeahan/espkvm-xbox/commit/3585933),

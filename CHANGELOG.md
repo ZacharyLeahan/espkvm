@@ -14,6 +14,9 @@ bumps the patch).
 
 ### Fixed
 
+- Bound plain-HTTP send retries with nonblocking writes; allow PCM stalls up to
+  250 ms. Live audio continuity remains under investigation.
+
 - Complete short plain-HTTP writes before advancing WebSocket framing, and
   close connections when a payload cannot be completed.
 
