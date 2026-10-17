@@ -7,6 +7,11 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Diagnostics
+
+- Add opt-in PCM sender task-state sampling with separate successful-write and
+  disconnect counts; leave it disabled by default to avoid playback overhead.
+
 ### Fixed
 
 - Flush CPU-edited H.264 SPS/frame data before the output buffer is reused by

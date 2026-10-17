@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +25,41 @@ typedef struct {
     kvm_audio_subscription_t *sub;
     kvm_auth_session_ref_t session;
     int64_t started_us;
+#if CONFIG_KVM_AUDIO_TASK_SAMPLING
+    TaskHandle_t sender;
+    SemaphoreHandle_t sampler_done;
+    atomic_bool sampling;
+    atomic_uint send_sequence;
+    atomic_uint blocked_samples, runnable_samples, other_samples, max_poll_us;
+#endif
 } stream_context_t;
+
+#if CONFIG_KVM_AUDIO_TASK_SAMPLING
+static void sample_sender(void *arg)
+{
+    stream_context_t *ctx = arg;
+    int64_t previous = esp_timer_get_time();
+    while (atomic_load(&ctx->sampling)) {
+        vTaskDelay(1);
+        const int64_t now = esp_timer_get_time();
+        const uint32_t interval = (uint32_t)(now - previous);
+        previous = now;
+        if (interval > atomic_load(&ctx->max_poll_us)) atomic_store(&ctx->max_poll_us, interval);
+        const unsigned sequence = atomic_load(&ctx->send_sequence);
+        if (!(sequence & 1)) continue;
+        const eTaskState state = eTaskGetState(ctx->sender);
+        // Reject samples spanning a send boundary. Runnable samples cannot
+        // distinguish actual execution from scheduler delay (including us).
+        if (sequence != atomic_load(&ctx->send_sequence)) continue;
+        if (state == eBlocked) atomic_fetch_add(&ctx->blocked_samples, 1);
+        else if (state == eReady || state == eRunning) atomic_fetch_add(&ctx->runnable_samples, 1);
+        else atomic_fetch_add(&ctx->other_samples, 1);
+    }
+    xSemaphoreGive(ctx->sampler_done);
+    // The sender can now release ctx; do not access it after signaling.
+    vTaskDelete(NULL);
+}
+#endif
 
 static bool send_all(httpd_req_t *req, const char *data, size_t size)
 {
@@ -53,6 +88,19 @@ static void stream_task(void *arg)
         "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
         "Cache-Control: no-store\r\nConnection: close\r\n"
         "X-Audio-Rate: %lu\r\nX-Audio-Format: s16le-stereo\r\n\r\n", (unsigned long)kvm_audio_rate());
+#if CONFIG_KVM_AUDIO_TASK_SAMPLING
+    ctx->sender = xTaskGetCurrentTaskHandle();
+    ctx->sampler_done = xSemaphoreCreateBinary();
+    atomic_init(&ctx->sampling, true);
+    atomic_init(&ctx->send_sequence, 0);
+    atomic_init(&ctx->blocked_samples, 0);
+    atomic_init(&ctx->runnable_samples, 0);
+    atomic_init(&ctx->other_samples, 0);
+    atomic_init(&ctx->max_poll_us, 0);
+    bool sampled = ctx->sampler_done &&
+        xTaskCreate(sample_sender, "audio_sample", 3072, ctx, 7, NULL) == pdPASS;
+    unsigned ok_blocked = 0, ok_runnable = 0, ok_other = 0;
+#endif
     bool sent = false;
     uint64_t sent_frames = 0, gap_frames = 0, next_frame = 0;
     uint32_t epoch = 0, resets = 0, slow_sends = 0;
@@ -75,12 +123,23 @@ static void stream_task(void *arg)
             if (!send_all(req, headers, header_size)) { ended = "header_send"; break; }
         }
         const int64_t sending = esp_timer_get_time();
+#if CONFIG_KVM_AUDIO_TASK_SAMPLING
+        atomic_fetch_add(&ctx->send_sequence, 1);
+#endif
         const bool ok = send_all(req, (const char *)block->pcm,
                                  block->frames * KVM_AUDIO_CHANNELS * sizeof(int16_t));
+#if CONFIG_KVM_AUDIO_TASK_SAMPLING
+        atomic_fetch_add(&ctx->send_sequence, 1);
+#endif
         const int64_t send_us = esp_timer_get_time() - sending;
         if (send_us > max_send_us) max_send_us = send_us;
         if (send_us > 5000) slow_sends++;
         if (!ok) { ended = "pcm_send"; break; }
+#if CONFIG_KVM_AUDIO_TASK_SAMPLING
+        ok_blocked = atomic_load(&ctx->blocked_samples);
+        ok_runnable = atomic_load(&ctx->runnable_samples);
+        ok_other = atomic_load(&ctx->other_samples);
+#endif
         if (send_us > max_ok_send_us) max_ok_send_us = send_us;
         if (have_frame) {
             if (epoch != block->epoch) resets++;
@@ -98,6 +157,20 @@ static void stream_task(void *arg)
         // Backpressure affects only this subscriber's bounded queue. The shared
         // I2S producer and SD recorder continue even if this socket times out.
     }
+#if CONFIG_KVM_AUDIO_TASK_SAMPLING
+    if (sampled) {
+        atomic_store(&ctx->sampling, false);
+        xSemaphoreTake(ctx->sampler_done, portMAX_DELAY);
+        ESP_LOGI("audio_stream", "sample_ok blocked=%u runnable=%u other=%u",
+                 ok_blocked, ok_runnable, ok_other);
+        ESP_LOGI("audio_stream", "sample_all blocked=%u runnable=%u other=%u poll_max_us=%u",
+                 atomic_load(&ctx->blocked_samples), atomic_load(&ctx->runnable_samples),
+                 atomic_load(&ctx->other_samples), atomic_load(&ctx->max_poll_us));
+    } else {
+        ESP_LOGW("audio_stream", "task-state sampling unavailable");
+    }
+    if (ctx->sampler_done) vSemaphoreDelete(ctx->sampler_done);
+#endif
     kvm_audio_subscription_stats_t stats;
     kvm_audio_subscription_stats(ctx->sub, &stats);
     // Keep each line within the retained log's 160-byte limit. Never log PCM,

@@ -93,6 +93,17 @@ menu "ESP-KVM"
                 it to the browser. Requires BCLK/LRCK/DATA wired from the capture
                 board to the ESP32-P4.
 
+        config KVM_AUDIO_TASK_SAMPLING
+            bool "Sample audio sender task state (diagnostic)"
+            depends on KVM_ENABLE_AUDIO && FREERTOS_USE_TRACE_FACILITY
+            default n
+            help
+                Sample the PCM sender once per scheduler tick during socket
+                writes. Log blocked and runnable observations at disconnect.
+                Adds a priority-7 task and 3 KB stack per active audio stream.
+                These coarse samples cannot distinguish running from ready
+                time and can perturb scheduling. Leave off for normal use.
+
         config KVM_ENABLE_DISPLAY
             bool "Status display (I2C OLED / round SPI LCD)"
             default y
