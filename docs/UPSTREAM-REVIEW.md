@@ -115,6 +115,8 @@ rerun for this documentation update.
 
 ## C6 receive boundary and radio power state (2026-10-17)
 
+Implementation: [71732e9](https://github.com/ZacharyLeahan/espkvm-xbox/commit/71732e9).
+
 Follow-up diagnostic-only work extends the default-off TCP probe with
 ESP-Hosted host counters, one midpoint snapshot after 100 ms of retries,
 `esp_wifi_get_ps()` at audio-stream start, and a read-only linker wrapper around
