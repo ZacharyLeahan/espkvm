@@ -47,6 +47,11 @@ static esp_cam_ctlr_handle_t s_cam;
 static isp_proc_handle_t s_isp_bypass;
 
 static capture_ctx_t s_cap;
+/* Capture activity, independent of viewer/encoder demand. ISR and task readers
+ * share a lock so the 64-bit timestamp and wrapping counter form one snapshot. */
+static portMUX_TYPE s_frames_mu = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_frames_total;
+static int64_t s_last_frame_us;
 static i2c_master_bus_handle_t s_i2c_bus; /* shared with an optional status OLED */
 
 /*
@@ -345,6 +350,10 @@ static bool IRAM_ATTR cam_on_done(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t 
     (void)__sync_add_and_fetch(&c->csi_dma_done_irqs, 1);
     /* A frame written to drop_fb matches no ring slot and is ignored here. */
     if (trans && trans->buffer) {
+        portENTER_CRITICAL_ISR(&s_frames_mu);
+        s_frames_total++;
+        s_last_frame_us = esp_timer_get_time();
+        portEXIT_CRITICAL_ISR(&s_frames_mu);
         int idx = -1;
         for (int k = 0; k < CAPTURE_FB_COUNT; k++) {
             if (trans->buffer == c->fb[k]) {
@@ -1087,4 +1096,12 @@ void capture_monitor_start(capture_ctx_t *c)
     }
     /* Below the capture task: telemetry must never delay an encode. */
     xTaskCreatePinnedToCore(capture_monitor_task, "cam_mon", 4096, c, 4, NULL, 0);
+}
+
+void capture_frame_counter(uint32_t *frames, int64_t *last_us)
+{
+    portENTER_CRITICAL(&s_frames_mu);
+    if (frames) *frames = s_frames_total;
+    if (last_us) *last_us = s_last_frame_us;
+    portEXIT_CRITICAL(&s_frames_mu);
 }

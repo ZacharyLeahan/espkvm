@@ -636,7 +636,10 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
     const char *rec_blocked = rec.recording ? NULL : kvm_record_blocked();
     const char *shot_blocked = kvm_record_screenshot_blocked();
 
-    char body[1664];
+    char age[16];
+    if (st.frame_age_ms == UINT32_MAX) snprintf(age, sizeof(age), "null");
+    else snprintf(age, sizeof(age), "%u", (unsigned)st.frame_age_ms);
+    char body[1792];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"inputHz\":%u,\"tooFast\":%s,"
@@ -647,7 +650,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      /* How long the picture has been one flat colour: the shape
                         of a stop screen or a blanked output, neither of which
                         can be read as text. 0 means it is a picture. */
-                     "\"textMode\":%s,\"flatMs\":%u,"
+                     "\"textMode\":%s,\"flatMs\":%u,\"frames\":%u,\"frameAgeMs\":%s,"
                      /* The recorder rides along: the console polls this anyway. */
                      "\"record\":{\"on\":%s,\"file\":\"%s\",\"seconds\":%u,\"bytes\":%llu,"
                      "\"dropped\":%u,\"stopped\":\"%s\",\"blocked\":%s%s%s,"
@@ -667,7 +670,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      video_frame_viewer_count(), (unsigned)s_video_client_count,
                      (unsigned)s_text_client_count, s_stream_workers, codec,
                      text_mode ? "true" : "false",
-                     (unsigned)st.flat_ms, rec.recording ? "true" : "false", rec.file,
+                     (unsigned)st.flat_ms, (unsigned)st.frames, age, rec.recording ? "true" : "false", rec.file,
                      (unsigned)rec.seconds, (unsigned long long)rec.bytes, (unsigned)rec.dropped,
                      rec.stopped, rec_blocked ? "\"" : "", rec_blocked ? rec_blocked : "null",
                      rec_blocked ? "\"" : "", rec.event ? "true" : "false",
@@ -854,7 +857,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"boardId\":\"%s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
-                     "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
+                     "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,\"psramLargest\":%u,"
                      "\"internalFree\":%u,\"internalLargest\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d,\"mode\":\"%s\",\"wifiUp\":%s,"
@@ -873,6 +876,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      (unsigned long long)(esp_timer_get_time() / 1000000),
                      (unsigned)esp_get_free_heap_size(),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (int)temp_c,
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,

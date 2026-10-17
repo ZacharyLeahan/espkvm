@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Fixed
 
+- Expose CSI frame count and frame age independently of encoder activity, and
+  report the largest free PSRAM block alongside total free memory.
+
 - Serialize writes per connection so slow video sends do not hold the control
   connection lock. Complete short TLS writes or fail the connection, yield on
   retries, and retain the PCM socket timeout. Keep fragments of one video

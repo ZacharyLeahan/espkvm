@@ -42,6 +42,10 @@ typedef struct {
     uint32_t flat_ms;
     /** The flat colour is black or nearly: a blanked output, not a stop screen. */
     bool flat_dark;
+    /** CSI completions since boot (wraps at UINT32_MAX), including drop buffers. */
+    uint32_t frames;
+    /** Age of the last CSI completion, UINT32_MAX before any frame. */
+    uint32_t frame_age_ms;
 } kvm_video_status_t;
 
 /**
@@ -80,6 +84,7 @@ void capture_reserve_early(void);
 void capture_start(void);
 
 void capture_status_get(kvm_video_status_t *out);
+void capture_frame_counter(uint32_t *frames, int64_t *last_us);
 
 /**
  * Whether the bridge can see the source's +5 V, which tells a target that is
