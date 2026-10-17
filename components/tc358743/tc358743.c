@@ -246,36 +246,44 @@ static const char *TAG = "tc358743";
 #define NO_PKT_LIMIT2 0x870e
 #define NO_GDB_LIMIT 0x9007
 
-#define FORCE_MUTE 0x8602
-#define AUTO_CMD0 0x8603
+/* Audio register map: TC358743, matching Linux tc358743_regs.h.
+ * The inherited sequential 0x8608..0x8612 addresses were not these registers. */
+#define AU_STATUS0 0x8523
+#define ANA_CTL 0x8545
+#define MASK_APPL_PCSX_NORMAL 0x30
+#define MASK_ANALOG_ON 0x01
+#define FS_SET 0x8621
+#define FORCE_MUTE 0x8600
+#define CMD_AUD 0x8601
+#define AUTO_CMD0 0x8602
 #define MASK_AUTO_MUTE7 0x80
 #define MASK_AUTO_MUTE6 0x40
 #define MASK_AUTO_MUTE5 0x20
 #define MASK_AUTO_MUTE4 0x10
 #define MASK_AUTO_MUTE1 0x02
 #define MASK_AUTO_MUTE0 0x01
-#define AUTO_CMD1 0x8604
+#define AUTO_CMD1 0x8603
 #define MASK_AUTO_MUTE9 0x02
-#define AUTO_CMD2 0x8605
+#define AUTO_CMD2 0x8604
 #define MASK_AUTO_PLAY3 0x08
 #define MASK_AUTO_PLAY2 0x04
 #define BUFINIT_START 0x8606
-#define SET_BUFINIT_START_MS(ms) ((ms) & 0xff)
+#define SET_BUFINIT_START_MS(ms) ((ms) / 100)
 #define FS_MUTE 0x8607
-#define FS_IMODE 0x8608
-#define MASK_NLPCM_SMODE 0x02
-#define MASK_FS_SMODE 0x01
-#define ACR_MODE 0x8609
-#define MASK_CTS_MODE 0x02
-#define ACR_MDF0 0x860a
-#define MASK_ACR_L2MDF_1976_PPM 0x20
-#define MASK_ACR_L1MDF_976_PPM 0x10
-#define ACR_MDF1 0x860b
+#define FS_IMODE 0x8620
+#define MASK_NLPCM_SMODE 0x20
+#define MASK_FS_SMODE 0x02
+#define ACR_MODE 0x8640
+#define MASK_CTS_MODE 0x01
+#define ACR_MDF0 0x8641
+#define MASK_ACR_L2MDF_1976_PPM 0x60
+#define MASK_ACR_L1MDF_976_PPM 0x05
+#define ACR_MDF1 0x8642
 #define MASK_ACR_L3MDF_3906_PPM 0x07
-#define SDO_MODE1 0x860d
+#define SDO_MODE1 0x8652
 #define MASK_SDO_FMT_I2S 0x02
-#define DIV_MODE 0x8612
-#define SET_DIV_DLY_MS(ms) ((ms) & 0xff)
+#define DIV_MODE 0x8665
+#define SET_DIV_DLY_MS(ms) ((((ms) / 100) << 4) & 0xf0)
 
 struct tc358743 {
     i2c_master_dev_handle_t i2c;
@@ -890,11 +898,45 @@ esp_err_t tc358743_get_timings(tc358743_t *d, tc358743_timings_t *out)
     memset(out, 0, sizeof(*out));
     out->hact = tc358743_read_hact_vact_htotal(d, &out->vact, &out->htotal, &out->vtotal);
 
+#if CONFIG_KVM_ENABLE_AUDIO && CONFIG_KVM_TC358743_ADV_DEBUG
+    static TickType_t last_audio_log;
+    TickType_t now = xTaskGetTickCount();
+    if (now - last_audio_log >= pdMS_TO_TICKS(5000)) {
+        last_audio_log = now;
+        ESP_LOGI(TAG, "audio HDMI sample=%u FS_CODE=%u CONFCTL=0x%04x I2S_FMT=0x%02x",
+                 rd8(d, AU_STATUS0) & 1u, rd8(d, FS_SET) & 0x0fu,
+                 rd16(d, CONFCTL), rd8(d, SDO_MODE1));
+        // Read back the clock and mute controls: HDMI packets alone do not prove I2S output.
+        ESP_LOGI(TAG, "audio controls SYS=%02x AU=%02x FORCE=%02x CMD=%02x AUTO=%02x/%02x/%02x FS=%02x/%02x ACR=%02x MDF=%02x/%02x DIV=%02x NCO=%02x",
+                 rd8(d, SYS_STATUS), rd8(d, AU_STATUS0), rd8(d, FORCE_MUTE), rd8(d, CMD_AUD),
+                 rd8(d, AUTO_CMD0), rd8(d, AUTO_CMD1), rd8(d, AUTO_CMD2),
+                 rd8(d, FS_IMODE), rd8(d, FS_MUTE), rd8(d, ACR_MODE),
+                 rd8(d, ACR_MDF0), rd8(d, ACR_MDF1), rd8(d, DIV_MODE), rd8(d, NCO_F0_MOD));
+        ESP_LOGI(TAG, "audio ref SYS_FREQ=%02x%02x LOCKDET=%02x%02x%02x",
+                 rd8(d, SYS_FREQ1), rd8(d, SYS_FREQ0),
+                 rd8(d, LOCKDET_REF2), rd8(d, LOCKDET_REF1), rd8(d, LOCKDET_REF0));
+        // Read-only diagnostics; interrupt bits are latched events, not current lock state.
+        ESP_LOGI(TAG, "audio raw CBIT_INT=%02x AUDIO_INT=%02x SDO0=%02x APIN0=%02x",
+                 rd8(d, 0x8505), rd8(d, 0x8506), rd8(d, 0x8651), rd8(d, 0x8690));
+    }
+#endif
     const uint8_t st = rd8(d, SYS_STATUS);
     out->sys_status = st;
     out->ddc5v = (st & TC358743_SYS_DDC5V) != 0u;
     out->tmds = (st & TC358743_SYS_TMDS) != 0u;
     out->hdmi_mode = (st & TC358743_SYS_HDMI_MODE) != 0u;
+#if CONFIG_KVM_ENABLE_AUDIO
+    if (out->hdmi_mode) {
+        // ANA_CTL resets in DVI mode. Linux restores it on I_HDMI; our driver polls.
+        // Without this, HDMI audio packets can be present while the audio PLL is off.
+        uint8_t analog = 0;
+        const uint8_t enabled = MASK_APPL_PCSX_NORMAL | MASK_ANALOG_ON;
+        if (i2c_read_reg(d, ANA_CTL, &analog, 1) == ESP_OK && analog != enabled) {
+            ESP_LOGI(TAG, "audio PLL enable: ANA_CTL 0x%02x -> 0x%02x", analog, enabled);
+            wr8(d, ANA_CTL, enabled);
+        }
+    }
+#endif
     out->sync = (st & TC358743_SYS_SYNC) != 0u;
     out->interlaced = (rd8(d, VI_STATUS1) & MASK_S_V_INTERLACE) != 0u;
     const uint32_t interval = ((uint32_t)(rd8(d, FV_CNT_HI) & 0x03u) << 8) | rd8(d, FV_CNT_LO);
