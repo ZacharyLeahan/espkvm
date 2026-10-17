@@ -62,7 +62,7 @@ inventory decisions farther down retain the original rationale and source URLs.
 | --- | --- | --- |
 | HDMI bridge recovery | Adapted in [8d94230](https://github.com/ZacharyLeahan/espkvm-xbox/commit/8d942304e8631b0ca37bf34e76d7e7e5fab61979): bounded I2C, failed reads and capped boot recovery, preserving HDMI audio PLL corrections. | Host failure tests/build passed previously; physical reconnects and oversized-to-supported mode changes with SD audio remain unverified. |
 | Settings and build paths | Console [9aea143](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/9aea143beee957604e4fbf4aac7b5da28588ed07); firmware [daffe2c](https://github.com/ZacharyLeahan/espkvm-xbox/commit/daffe2c2f4872db3b61aa3be9a4163f4741d0541). Safe drafts, grouping, initial section, card wording and explicit component paths are implemented. | Console tests/typecheck and source-copy build passed previously; first-open selection and grouping were checked in the browser; delayed-save interaction remains. Parent console pin is published. |
-| Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks and both encode-path builds passed. Four post-cache-fix one-minute clips and a ten-minute combined video/PCM/SD run decoded cleanly. Live video remains about 4.2 fps and network PCM had a sample-duration shortfall; see the extended test below. Video-only recording and host AAC-preserving MP4 conversion passed. Authenticated HTTPS/WebCodecs, slow-viewer recovery, longer endurance and physical A/V delay remain. The earlier intermittent corruption is not deterministically attributed; see the cache correction below. |
+| Video delivery and recovery | SPS [1ba5d84](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1ba5d84a6e3b534258109b1a3ef97baa7ca9f57b), ACK/keyframe handling [9dcc15d](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9dcc15de36ce15d1243904a9046294d13a2e1efd), session transport [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e), console [a258024](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/a258024c2ea4300ad5f0d1d3fe9da526191e1cac). | Host checks and both encode-path builds passed. Four post-cache-fix one-minute clips and a ten-minute combined video/PCM/SD run decoded cleanly. Live video remains limited and network PCM has measured transport gaps; see the live PCM diagnosis and extended tests below. Video-only recording and host AAC-preserving MP4 conversion passed. Authenticated HTTPS/WebCodecs, slow-viewer recovery, longer endurance and physical A/V delay remain. The earlier intermittent corruption is not deterministically attributed; see the cache correction below. |
 | Microlink reliability | Six source-attributed cherry-picks plus reconnect/path adaptation [d3210a0](https://github.com/ZacharyLeahan/microlink/commit/d3210a0523766d6917706aa643750082f61d49f8); exact sources and boundaries are recorded below. | Host checks/build passed previously; direct discovery and tailnet HTTP passed; relay, peer reboot, clock sync and repeated TLS failures remain. Parent dependency pin is published. |
 | Memory and diagnostics | Upload fallback/lazy WireGuard [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67), freshness [f723d14](https://github.com/ZacharyLeahan/espkvm-xbox/commit/f723d144f4fa5248a60695478f827b3d3242a531), heap/task endpoint [4ccb502](https://github.com/ZacharyLeahan/espkvm-xbox/commit/4ccb50280c8f92556d310efcd42825faa3463e04). | Host checks/build passed previously; live upload checks and a ten-minute combined-load memory sample passed without progressive loss; worst-case allocation behavior remains unverified. API skill is published; upstream MCP remains an explicitly recorded access gap. |
 
@@ -112,6 +112,107 @@ No newly discovered upstream change requires immediate adoption.
 This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
+
+## Live PCM queue diagnosis (2026-10-17)
+
+[Diagnostics implementation](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b2d1424c75ea0ececfa5abcb38e339af0ff433c4)
+is fork-origin work on top of merged [PR #4](https://github.com/ZacharyLeahan/espkvm-xbox/pull/4)
+(`1311644`), not an additional upstream adaptation. PR #4's test/build checks
+subsequently all passed (release/pages were skipped).
+
+A 60-second combined recording/network PCM run
+with a 40-second H.264 viewer isolated a live-audio delivery problem: the old
+40 ms subscriber queue dropped 10,800 frames (225 ms at 48 kHz), exactly matching
+read-block sample-index gaps. Startup was 5.942 ms; 36 sends exceeded 5 ms
+and the longest
+lasted 98.988 ms. Capture epochs did not change. The network observer received
+59.750 s of PCM in 60.005 s, while the independent SD audio queue dropped zero
+frames and both saved tracks decoded cleanly. Queue loss explains most of that
+shortfall, rather than merely inferring loss from wall time.
+
+An experimental browser subscriber held 24 five-millisecond blocks (120 ms),
+allowing 20 ms margin above the first observed stall. It still discarded oldest
+blocks on sustained backpressure and never blocked the producer or recorder.
+Later successful sends exceeded that capacity, so the final change retains the
+original 40 ms queue rather than spending extra PSRAM and latency on an
+unproven fix. The recorder's one-second queue is unchanged.
+Stream-end logs separately report complete sent/read frames, queue drops,
+within-epoch gaps between completely sent blocks, epoch changes, time to first
+block, maximum send time (all and successful calls separately), sends over 5 ms
+and maximum block age before send. A progress line every 30 seconds distinguishes
+ongoing delivery from final client-close failures. Queue drops can include
+blocks discarded while a closing client's final send is failing, and successful
+send means accepted by the transport, not rendered by a speaker. Lines fit
+the retained log's
+160-byte limit. No endpoint, authentication or error-code contract changed.
+
+Baseline evidence remains local: `/tmp/espkvm-delivery-baseline-02/result.json`,
+`/tmp/espkvm-delivery-baseline-h264.log` and
+`/tmp/espkvm-delivery-baseline-device.log`. The first baseline start returned
+409 shortly after boot; the later retry succeeded. A first post-flash probe
+could not reach the device; it changed no settings. These startup attempts are
+not passing streaming trials.
+
+The first 120 ms queue trial saved `VIDEO/up-000034-2.ts` (11,642,652 bytes,
+583 video frames), with both tracks decoding cleanly, zero recorder audio/video
+drops, and 59.925 s of AAC. Network PCM was 59.770 s over 60.006 s; the 40-second
+video probe completed at 6.4 fps. The original end-only diagnostic reported
+10,320 read-block gap frames and 73,440 queue drops, but included a 1.439 s final
+failed send after the observer closed. This did not establish a live continuity
+improvement, so diagnostics were refined before the extended repeat.
+Evidence: `/tmp/espkvm-delivery-fixed-02/result.json`,
+`/tmp/espkvm-delivery-fixed-h264.log`, `/tmp/espkvm-delivery-fixed-device.log`.
+
+The ten-minute 120 ms queue experiment then reported 96,240 gap frames
+(2.005 s) between complete writes with no capture epoch changes. Successful
+sends reached 361.929 ms. Startup was 0.934 ms; the final failed send took
+1.313 s, and total queue drops rose to 153,600 frames while that connection
+closed. Those total drops must not be presented as 3.2 s of audible loss.
+The original 570-second video probe disconnected early after 337 frames
+(code 1006); the device logged send error 11 and a failed WebSocket header.
+A separate reconnect completed 450 seconds: 2,762 frames, 6.1 fps,
+857 kbit/s, 313 keyframes, ACKs negotiated. Thus this is not a passing
+uninterrupted ten-minute video-stream test, and its different load prevents
+a clean performance comparison with the original 40 ms queue run.
+
+The saved ten-minute file passed strict H.264 and AAC decoding:
+`VIDEO/up-000031-2.ts`, 111,909,256 bytes, 5,395 video frames and 600.043 s of
+48 kHz stereo AAC. Recorder video/audio drops were zero, with 959 inserted
+silence/padding frames. Track starts matched and AAC packet gaps were within
+1 microsecond rounding. Network PCM contained 597.945 s over 600.007 s;
+26,677,705 active frames confirmed captured sound, not continuous audibility.
+Thirteen active-load memory samples ranged from
+48,451..56,707 free internal bytes and 12,755,404..12,818,776 free PSRAM bytes;
+the post-stop sample recovered to 78,823 and 16,780,456 bytes respectively.
+The recorder stopped on its limit and settings were restored.
+
+Evidence stays local under `/tmp/espkvm-delivery-extended-01/`, with transport
+and memory summaries in `/tmp/espkvm-delivery-extended-monitor.log` and video
+logs `/tmp/espkvm-delivery-extended-video.log` and
+`/tmp/espkvm-delivery-extended-video-retry.log`. Saved TS SHA-256:
+`72fc2596259c8fea7ab7b91ef24e65146274dc748b0d8aa0620500b02f6c5790`.
+The Xbox build and ACK/SPS/flat-frame host checks passed. The ten-minute
+experiment used 120 ms buffering; the final implementation retains 40 ms.
+
+After restoring the original 40 ms queue, a final 30-second combined check
+passed strict H.264/AAC decode (`VIDEO/up-000046-2.ts`, 290 video frames,
+29.888 s AAC, zero recorder drops). Its 20-second video probe completed at
+6.2 fps with ACKs; network PCM was 29.935 s over 30.007 s. Diagnostics recorded
+2,640 gap frames (55 ms), successful sends up to 41.629 ms, and a separate
+1.332 s final failed send. This verifies the retained diagnostics, not gap-free
+playback. The device is left on this image with recording stopped and settings
+restored. Evidence: `/tmp/espkvm-delivery-final-01/result.json`,
+`/tmp/espkvm-delivery-final-video.log`, `/tmp/espkvm-delivery-final-device.log`.
+
+Next: compare the same bounded workload at a lower H.264 bitrate to test
+whether video bursts contribute to shared network stalls, then investigate
+send scheduling/packetization. Keep uninterrupted video, live PCM continuity,
+browser playback and physical latency open in the acceptance ledger.
+
+The PCM counters measure server transport, not speaker output. The browser
+still limits individual chunks to the newest 60 ms and resets playback backlog
+over 120 ms. Even zero server gaps would not prove lossless browser playback,
+physical A/V synchronization, HTTPS behavior or recovery under longer stalls.
 
 ## Ten-minute combined streaming/recording test (2026-10-17)
 

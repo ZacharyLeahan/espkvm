@@ -43,6 +43,13 @@ Live video averaged 4.2 fps; network audio captured 596.760 seconds of PCM over
 600.017 seconds, so streaming continuity still needs work even though the saved
 recording passed. See the [extended test evidence and limits](UPSTREAM-REVIEW.md#ten-minute-combined-streamingrecording-test-2026-10-17).
 
+A later ten-minute repeat also passed strict video/audio decoding: 5,395 video
+frames, 600.043 s of AAC and zero recorder-reported drops. Live transport still
+had 2.005 s of measured PCM gaps and one video disconnect. An experimental
+120 ms live-audio queue did not resolve the stalls and was reverted; the
+recorder queue was unchanged. See the [delivery diagnosis](UPSTREAM-REVIEW.md#live-pcm-queue-diagnosis-2026-10-17)
+for the failed experiment and retained diagnostics.
+
 ## H.264 cache correction (2026-10-17)
 
 The reliability branch now flushes CPU-edited SPS/keyframe data before the
