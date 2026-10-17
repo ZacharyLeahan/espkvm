@@ -113,6 +113,72 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## C6 receive boundary and radio power state (2026-10-17)
+
+Follow-up diagnostic-only work extends the default-off TCP probe with
+ESP-Hosted host counters, one midpoint snapshot after 100 ms of retries,
+`esp_wifi_get_ps()` at audio-stream start, and a read-only linker wrapper around
+`esp_netif_receive`. The wrapper validates Ethernet/IPv4 TCP checksums and
+observes ACKs only for the selected audio tuple. Original buffer, length, opaque
+handle, ownership and return value pass unchanged to the real function.
+It does not inspect TLS, VLAN frames, native IPv6 or fragmented IP.
+No sender policy, queue, timeout, API/auth contract or C6 firmware was changed.
+
+**Measured findings:**
+
+- All three stream-start readbacks returned `ESP_OK`, mode 0 (`WIFI_PS_NONE`).
+  This confirms the C6 reports modem sleep off at those points; it is not a
+  continuous measurement of radio state.
+- The receive-counter run completed 150.004 seconds, delivering 149.475 seconds
+  of PCM. During a 216.453 ms send, RX-in/RX-out rose together from 10,663 to
+  10,684 by the midpoint while TCP's ACK stayed unchanged. Both then reached
+  10,712 at completion. Counter snapshots showed zero TX drops/credit stalls.
+  RX-in counts parsed station frames; RX-out counts stack-callback attempts,
+  not successful acceptance. These cross-task counters are approximate.
+- The first ACK-ingress run delivered 149.725 seconds over 150.007 seconds,
+  with 255 ms confirmed producer gaps and maximum successful send 110.160 ms.
+  It was quiet PCM (zero active frames), so this validates transport only.
+  All six captured valid ingress/TCP ACK comparisons matched.
+- The repeat delivered 149.140 seconds over 150.006 seconds, with 810 ms
+  confirmed gaps and maximum successful send 249.783 ms. Its one active frame
+  is insufficient evidence of audible content; treat it as effectively quiet.
+  All 15 valid captured ingress/TCP ACK comparisons matched, including midpoint
+  snapshots. In a 127.117 ms send, the matching ingress ACK count stayed at
+  12,116 from first to midpoint, with ACK age growing from 13 to 118 ms. During
+  that same interval RX-in/RX-out both advanced from 59,305 to 59,327. Thus
+  other packets crossed the host receive path while this flow's next valid ACK
+  had not reached the observed boundary. The maximum sampled ACK age was 145 ms.
+  Bad IP/TCP checksum counts remained zero in the captured snapshots.
+- The repeat's receiver-side trace had 29,863 data packets, maximum arrival gap
+  243.199 ms, no repeated/out-of-order sequence ranges, and no kernel capture
+  drops. It again showed prompt local ACK emission; capture timestamps do not
+  prove when the ACK crossed the radio link. Both observers finished their
+  requested durations; timeout logs after client shutdown are not early failures.
+
+**Interpretation:** the sampled stalls do not show TCP holding a newer ACK that
+already reached P4 ingress, nor the entire C6/P4 receive pipeline stopping.
+Evidence instead points before that ingress boundary for the audio ACK flow.
+This narrows the investigation but cannot distinguish AP/radio delivery,
+C6 packet handling or an earlier SDIO stage, and cannot exclude unobserved
+transient backlog. There is no evidence here to justify increasing sender
+buffers, changing deadlines or patching TCP ACK handling.
+
+Startup also logged host ESP-Hosted 3.0.9 versus coprocessor 0.0.0 and a mismatch
+warning. The host initializes that field to zero and fills it only from an
+optional firmware-version TLV. Therefore 0.0.0 is not a verified C6 firmware
+identity or proof that updating it fixes these stalls. C6 flashing was not done.
+A useful next step is to establish the actual C6 build/protocol compatibility
+and compare the same path on another access point before selecting a radio fix.
+
+The enabled build and checksum/parser tests passed. Host tests cover valid ACKs,
+wrong tuples, truncated/malformed lengths, fragments, checksum failures and
+unchanged packet bytes under ASan/UBSan; existing TX/pacing tests also pass.
+The initial diagnostic dependency declaration was corrected before flashing.
+Raw captures remain local: `/tmp/espkvm-rxprobe-01`, `/tmp/espkvm-ackprobe-01`,
+and `/tmp/espkvm-ackprobe-02`. No new microSD or subjective listening acceptance
+is claimed. PR #7 remains draft; the normal configuration keeps both TCP and
+ESP-Hosted packet diagnostics disabled.
+
 ## TCP queue and path correlation (2026-10-17)
 
 Instrumentation and evidence: [1d44bd3](https://github.com/ZacharyLeahan/espkvm-xbox/commit/1d44bd3).

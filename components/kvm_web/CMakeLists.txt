@@ -49,3 +49,15 @@ idf_component_register(
         "assets/icon-192.png"
         "assets/icon-512.png"
 )
+
+# These diagnostics use Wi-Fi components already selected by the board profile.
+if(CONFIG_KVM_HTTP_TX_DIAGNOSTICS AND CONFIG_KVM_WIFI)
+    idf_component_optional_requires(PRIVATE esp_wifi)
+    if(CONFIG_ESP_HOSTED_HOST_PKT_STATS)
+        idf_component_optional_requires(PRIVATE espressif__esp_hosted)
+    endif()
+endif()
+
+if(CONFIG_KVM_HTTP_TX_DIAGNOSTICS)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=esp_netif_receive" APPEND)
+endif()

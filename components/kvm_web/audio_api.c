@@ -15,6 +15,9 @@
 #if CONFIG_KVM_ENABLE_AUDIO
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS && CONFIG_KVM_WIFI
+#include "esp_wifi.h"
+#endif
 #include <inttypes.h>
 #include "lwip/sockets.h"
 #include "lwip/tcp.h"
@@ -79,6 +82,12 @@ static void stream_task(void *arg)
     httpd_req_t *req = ctx->req;
     kvm_audio_block_t *block = heap_caps_malloc(sizeof(*block), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     int fd = httpd_req_to_sockfd(req);
+#if CONFIG_KVM_HTTP_TX_DIAGNOSTICS && CONFIG_KVM_WIFI
+    wifi_ps_type_t radio_ps = WIFI_PS_NONE;
+    const esp_err_t radio_err = esp_wifi_get_ps(&radio_ps);
+    ESP_LOGI("tx_probe", "radio_ps err=%s mode=%d (0=none,1=min,2=max)",
+             esp_err_to_name(radio_err), radio_err == ESP_OK ? (int)radio_ps : -1);
+#endif
     int nodelay = 1;
     // Allow a brief network stall to recover without enlarging the PCM queue.
     struct timeval timeout = {.tv_sec = 0, .tv_usec = 250000};

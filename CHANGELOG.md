@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Diagnostics
 
+- Correlate optional TCP stall snapshots with C6 receive counters, valid ACKs
+  entering the P4 stack, and the radio power-save readback.
+
 - Add default-off TCP queue and retry timing diagnostics for stalled HTTP PCM
   sends, including IPv4-mapped socket matching.
 

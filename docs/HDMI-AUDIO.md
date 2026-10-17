@@ -282,3 +282,17 @@ valid TCP snapshot; do not interpret its zero fields as an empty queue.
 Poll device logs during a bounded observation; the ring cannot retain a long
 run. Disable the option again for normal playback. See the upstream review
 ledger for measured stalls and remaining network-path uncertainty.
+
+With Wi-Fi enabled, the diagnostic logs `esp_wifi_get_ps()` at stream start;
+mode 0 with `ESP_OK` confirms the radio reports power saving off. Enable
+`CONFIG_ESP_HOSTED_HOST_PKT_STATS` alongside it to include approximate C6-to-P4
+receive and stack-callback counters at first stall, after 100 ms of retries,
+and at completion. RX-out counts callback attempts, not confirmed acceptance.
+
+The diagnostic linker wrapper observes Ethernet/IPv4 TCP ACKs for the selected
+port-80 audio tuple at `esp_netif_receive`, validates IP/TCP checksums, and then
+passes the original buffer and arguments through unchanged. It does not cover
+VLAN, native IPv6, fragmented IP or HTTPS. `ingress count=0` means no matching
+ACK has been observed since tuple selection; its ACK/age fields are not evidence.
+Snapshots are approximate across tasks, and the first probe selects the tuple
+only when a send first stalls. Disable both diagnostic options after testing.
