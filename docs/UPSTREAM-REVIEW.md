@@ -163,6 +163,36 @@ LRU protection.
   partial-write handling and simultaneous SD AAC/PCM verification remain open.
   No flash, push or measured latency claim accompanies this commit.
 
+## Per-session transport progress (2026-10-16)
+
+Implementation: [b63b60e](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b63b60e41b92a3cafd1f4f47cb40637b93b2e55e).
+Adapts the remaining session-lock, partial-TLS-write, TCP_NODELAY and WebSocket
+LRU subsets of `f28e9ff`. Live transport acceptance is still outstanding.
+
+- Separate recursive write locks isolate sessions. Waiting writers recheck the
+  slot generation after acquiring its lock; TLS context lookup happens inside
+  that lock. A complete fragmented WebSocket message retains the lock to avoid
+  another data message being inserted between fragments. Partial mutex startup
+  allocation is cleaned up before a retry.
+- TLS writes complete their buffer or fail and shut down the connection. Retry
+  loops yield and use the socket's timeout as their deadline, capped at five
+  seconds, retaining PCM's 100 ms configuration. This is a software retry budget,
+  not a measured hard real-time wall-clock guarantee for a blocking TLS call.
+- New sessions disable Nagle and refresh existing WebSocket LRU counters. IDF
+  6.1 `httpd_sess.c` excludes `for_async_req` sessions from LRU selection, so
+  async PCM/MJPEG/upload workers already have that protection. Refreshing a
+  WebSocket is a preference over idle HTTP, not immunity when all slots are active.
+- Production-function host tests pass under address/undefined sanitizers:
+  another session proceeds while one is locked, recursive acquisition works,
+  changed generations reject a queued writer, partial writes advance correctly,
+  retry paths yield, PCM/default retry budgets terminate, and closed sessions
+  cannot look up a TLS context. The final audio-enabled firmware build passed
+  without warnings in the incremental build. CI includes these tests.
+- Device latency, simultaneous PCM/AAC recording, slow viewers, connection-pool
+  exhaustion and repeated teardown still require integrated testing. No flash,
+  push or before/after performance claim was made in this step. Diagnostics and
+  remaining Microlink validation are still unfinished parts of the five-area goal.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
