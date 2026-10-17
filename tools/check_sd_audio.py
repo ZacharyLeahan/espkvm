@@ -229,7 +229,8 @@ def check(args):
             raise CheckFailed('Audio listener is in use; use --no-network-audio for a normal audio recording')
         settings = device.api('/api/v1/settings')
         original = {key: settings[key] for key in VIDEO_SETTINGS}
-        desired = dict(VIDEO_SETTINGS)
+        desired = dict(VIDEO_SETTINGS, h264_kbps=args.h264_kbps)
+        report['requested_video_settings'] = desired.copy()
         if args.video_only:
             original['aud_enable'] = settings['aud_enable']
             desired['aud_enable'] = False
@@ -242,6 +243,10 @@ def check(args):
         report['original_settings'] = original
         changed = True  # A failed PUT may still have reached the device.
         device.api('/api/v1/settings', 'PUT', desired)
+        applied = device.api('/api/v1/settings')
+        report['applied_video_settings'] = {key: applied.get(key) for key in VIDEO_SETTINGS}
+        if any(applied.get(key) != value for key, value in desired.items()):
+            raise CheckFailed('Device did not apply requested test settings')
         time.sleep(1)
         for attempt in range(5):
             current = device.api('/api/v1/record/status')
@@ -339,6 +344,7 @@ def check(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('url', help='Device HTTP(S) origin without credentials')
+    parser.add_argument('--h264-kbps', type=int, default=4000, help='Target H.264 bitrate, 500..20000 (default: 4000)')
     parser.add_argument('--seconds', type=int, default=8, help='Bounded recording duration, 1..600 (default: 8)')
     parser.add_argument('--output-dir', required=True, type=Path, help='New ignored/outside-checkout evidence directory')
     parser.add_argument('--no-network-audio', action='store_true', help='Do not open a parallel live-audio listener')
@@ -353,6 +359,8 @@ def main(argv=None):
         parser.error('URL must be an HTTP(S) origin without credentials, query or path')
     if not 1 <= args.seconds <= 600:
         parser.error('--seconds must be in 1..600')
+    if not 500 <= args.h264_kbps <= 20000:
+        parser.error('--h264-kbps must be in 500..20000')
     if args.video_only:
         args.expect_audio = False
         args.no_network_audio = True

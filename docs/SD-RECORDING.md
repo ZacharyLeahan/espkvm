@@ -135,12 +135,15 @@ python3 tools/check_sd_audio.py http://esp.local --seconds 8 --output-dir ignore
 python3 tools/check_sd_audio.py http://esp.local --seconds 60 --output-dir ignore/sd-check-60s
 python3 tools/check_sd_audio.py http://esp.local --seconds 600 --output-dir ignore/sd-check-10min
 python3 tools/check_sd_audio.py http://esp.local --seconds 8 --video-only --output-dir ignore/sd-check-video-only
+# Add --h264-kbps 1000 for a lower-bitrate comparison (default: 4000).
 # Add --no-network-audio to test SD alone or leave an existing listener alone.
 # Authenticated HTTPS: --cookies cookies.txt --ca espkvm-ca.pem
 ```
 
 Recording and PCM observation tools accept up to 600 seconds; downloads remain
-bounded to 512 MiB. For a live-video load, start `tools/video_probe.mjs` after
+bounded to 512 MiB. `--h264-kbps` accepts 500..20000; the helper verifies the
+applied settings and restores the previous bitrate after the trial. Requested
+and applied video settings are retained in `result.json`. For a live-video load, start `tools/video_probe.mjs` after
 the helper reports the recording path, with a duration that ends before the
 recording does. Do not operate the recorder concurrently.
 
