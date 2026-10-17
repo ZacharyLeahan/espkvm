@@ -1,7 +1,7 @@
 /*
  * Watch the device's video channel without a browser.
  *
- *   node tools/video_probe.mjs espkvm.local 6 [out.h264]
+ *   node tools/video_probe.mjs espkvm.local 6 [out.h264] [device-ca.pem]
  *   node tools/video_probe.mjs http://192.168.1.169 6 [out.h264]
  *
  * Prints frame type and size and, for H.264, the NAL units in each frame -
@@ -15,7 +15,7 @@
  * wrong stride or a missed crop still decodes, it just looks wrong.
  */
 import { createRequire } from "node:module";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, readFileSync } from "node:fs";
 
 /* `ws` belongs to the console's dependencies; resolve it from there rather
  * than asking the repository root for a node_modules of its own. */
@@ -25,13 +25,17 @@ const WebSocket = require("ws");
 const host = process.argv[2] ?? "espkvm.local";
 const seconds = Number(process.argv[3] ?? 5);
 const dumpPath = process.argv[4];
+const caPath = process.argv[5];
 const origin = host.includes("://") ? host : `wss://${host}`;
 const endpoint = new URL("/video", origin);
 endpoint.protocol = endpoint.protocol === "http:" ? "ws:" : endpoint.protocol === "https:" ? "wss:" : endpoint.protocol;
 
 const dump = dumpPath ? createWriteStream(dumpPath) : null;
-/* The device's certificate is self-signed, which is the point of it. */
-const ws = new WebSocket(endpoint, { rejectUnauthorized: false });
+/* Supply the exported device CA for certificate-verified TLS checks. The
+ * legacy no-CA mode remains useful during initial device setup. */
+const ws = new WebSocket(endpoint, caPath
+  ? { ca: readFileSync(caPath), rejectUnauthorized: true }
+  : { rejectUnauthorized: false });
 
 let frames = 0;
 let bytes = 0;
