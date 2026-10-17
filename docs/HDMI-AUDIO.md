@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Experimental HDMI audio
 
 The remote viewer can receive stereo PCM from the C790 through the ESP32-P4.
@@ -193,7 +195,9 @@ A video viewing token does not authorize audio. Responses are not cached.
   `X-Audio-Format: s16le-stereo` describe the stream. HTTP 401 means sign-in is
   needed, 409 means another listener is active, and 503 means disabled,
   unconfigured, allocation failure, or no usable initial I2S samples. A running
-  stream closes on clock loss, logout, or send failure/timeout. DMA overruns
+  stream closes on clock loss, logout, session revocation, or send failure/timeout.
+  Password changes revoke the session; enabling login also ends a stream opened
+  without login. DMA overruns
   remain counted but trigger a capture reset so sound can resume.
 - `GET /api/v1/audio/status`: JSON with `available` (receiver initialized, not
   proof of wiring), `enabled`, `streaming`, `rate`, `channels`, `frames`,

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # HDMI audio validation - 2026-10-16
 
 Live HDMI audio reached both a browser and a bounded PCM recorder. A single
@@ -125,15 +127,48 @@ The fresh build emitted 11 unused-variable/function warnings: one in DSI
 preview and ten in the existing Microlink/WireGuard sources; none were in the
 new audio overlay or audio/network allocator code. Its initial image SHA-256
 was `0d6ac1362c8709a6f237533a35bb49b3584c5d75f2d042c5e7d98c97c452b74b`.
-This build and the live tests preceded a subsequent authentication-lifetime
-follow-up. They do not validate that follow-up or live authenticated logout;
-final source verification must record its own build/test outcome.
+This initial build and the live tests preceded the authentication-lifetime
+follow-up below. They do not validate live authenticated logout.
+
+### Final session-lifetime follow-up
+
+[Commit a98d060](https://github.com/ZacharyLeahan/espkvm-xbox/commit/a98d06062166d595988332a546c49859974196b0)
+binds an audio stream to its originating cookie session, instead of the
+WebSocket socket allow-list. Both final configurations built successfully
+(exit 0) with this change. The generated configurations explicitly confirmed
+that audio was enabled with GPIO22/53/27 in `build.audio-repro` and disabled
+in `build.audio-disabled`. No new audio/auth/allocator warnings appeared.
+
+| Final local build | Firmware bytes | SHA-256 |
+| --- | ---: | --- |
+| Audio enabled | 2,118,304 | `ae85852a325e49dfae5cca6e53d00bf2f17832cd0295b5bbb11498bedfacb43a` |
+| Audio disabled | 2,057,120 | `e1998c87a0921ca304103d07fd2e8c10af60540143e77cd97a71a0ab2d888789` |
+
+These build artifacts contain local Git version metadata and were not flashed.
+The running unit remains on the working audio build used for the live results.
+
+A temporary host harness compiled the production session lookup, clear,
+logout, capture-reference and validation functions with C11 warnings treated
+as errors. Eight lifecycle cases passed: valid session/sliding expiry, logout,
+expiry, password-session clearing, slot replacement, mandatory-password-change
+refusal, rejected admission, and enabling login after an unauthenticated start.
+The clock, request authentication/cookie reader, locking and HTTP responses were
+stubbed. This is a focused logic check, not an HTTP integration or concurrency
+test; it is not part of the committed CI suite. The capture tool's three tests
+were also rerun successfully and added to CI.
+
+For hardware auth acceptance, sign in, open audio with that session, and sign
+out while another authenticated session watches status. Verify capture closes
+and a new request with the expired cookie is refused. Repeat after a password
+change and after enabling login during a previously unauthenticated capture.
+Those device-level checks remain outstanding; no login settings were changed
+on the user's device during this validation.
 
 ## Remaining limits
 
 Subjective listening quality, correct recognition of game sounds, lip sync,
 physical end-to-end delay, HTTPS streaming, Ethernet/VPN behavior, repeated
-HDMI hot-plug recovery, authenticated-session revocation, and long endurance
+HDMI hot-plug recovery, authenticated-session revocation on hardware, and long endurance
 are not established here. Activity
 meters do not prove that the game played the intended sound. The source format
 must match the configured sample rate; the receiver does not follow rate

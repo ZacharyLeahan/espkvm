@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Fixed
 
+- Bind audio streams to their originating login session so logout, password
+  changes and session revocation stop capture.
+
 - Correct inherited TC358743 audio register addresses, clock recovery masks,
   and delay-field encoding so I2S output can actually be configured.
 - Restore the TC358743 audio PLL enable after HDMI detection. Its ANA_CTL

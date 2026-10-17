@@ -161,10 +161,13 @@ measured sample activity from subjective sound quality and physical latency.
   Opt-in slave I2S capture, authenticated single-listener PCM, freshness/activity
   diagnostics, and the bounded WAV observation tool. This is fork implementation
   work, separate from the two adaptations above.
+- Session lifetime: [a98d060](https://github.com/ZacharyLeahan/espkvm-xbox/commit/a98d06062166d595988332a546c49859974196b0).
+  Bind audio to its originating cookie session so logout/password changes revoke
+  it. Eight host lifecycle cases passed; authenticated hardware logout is untested.
 - Console: [03f0a71](https://github.com/ZacharyLeahan/espkvm-console-xbox/commit/03f0a719ae272c2fd5ed2ed60000c26db68fde50).
   PCM framing, playback queue bounds, cancellation and bounded reconnect tests.
   The firmware submodule pin and bundled viewer use this published revision.
-- API skill contract: [994c64a](https://github.com/ZacharyLeahan/espkvm-skills-xbox/commit/994c64a).
+- API skill contract: [002ce16](https://github.com/ZacharyLeahan/espkvm-skills-xbox/commit/002ce16977254490d7cc4a74232ade0738fab180).
   The upstream `espkvm/mcp` repository returned HTTP 404; no MCP server change or
   validation is claimed. The standalone observation tool remains available.
 - [Wiring and usage](HDMI-AUDIO.md), [reproduction and measured evidence](AUDIO-VALIDATION-2026-10-16.md).
