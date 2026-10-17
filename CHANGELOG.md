@@ -9,6 +9,9 @@ bumps the patch).
 
 ### Fixed
 
+- Flush CPU-edited H.264 SPS/frame data before the output buffer is reused by
+  encoder DMA, preventing dirty cache lines from overwriting later frames.
+
 - Build Ethernet-only profiles when Wi-Fi credential defaults are omitted by
   Kconfig, while keeping unavailable settings visible in the console schema.
 

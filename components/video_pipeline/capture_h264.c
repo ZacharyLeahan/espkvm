@@ -822,6 +822,22 @@ static void follow_settings(void)
      * encoder applies a changed value at the next IDR anyway. */
 }
 
+/* SPS insertion moves the entire IDR through the CPU cache. The encoder only
+ * writes back its small slice header before the next DMA, so dirty tail lines
+ * would otherwise be able to overwrite that next frame during eviction. Flush
+ * the owned, cache-aligned slot before publishing it for eventual DMA reuse. */
+static size_t h264_finalize_idr(uint8_t *dst, size_t len, size_t cap)
+{
+    const size_t patched = h264_sps_add_restriction(dst, len, cap);
+    const esp_err_t err = esp_cache_msync(dst, cap, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    if (err != ESP_OK) {
+        ESP_LOGE(CAPTURE_LOG_TAG, "h264 SPS writeback: %s", esp_err_to_name(err));
+        video_frame_request_keyframe();
+        return 0;
+    }
+    return patched;
+}
+
 #if !CAPTURE_DIRECT_ENCODE
 /* Encode one filled YUV buffer and publish it. Runs on the encode task, so it
  * overlaps the PPA conversion of the following frame. */
@@ -881,7 +897,10 @@ static void h264_encode_job(const h264_job_t *job)
     const bool is_idr = out.frame_type == ESP_H264_FRAME_TYPE_IDR;
     wedge_watch(is_idr, out.length);
     if (is_idr) {
-        out.length = (uint32_t)h264_sps_add_restriction(dst, out.length, cap);
+        out.length = (uint32_t)h264_finalize_idr(dst, out.length, cap);
+        if (!out.length) {
+            return;
+        }
     }
     video_frame_publish(slot, out.length, is_idr);
     capture_status_add_frame(out.length);
@@ -982,7 +1001,10 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
     const bool is_idr = out.frame_type == ESP_H264_FRAME_TYPE_IDR;
     wedge_watch(is_idr, out.length);
     if (is_idr) {
-        out.length = (uint32_t)h264_sps_add_restriction(dst, out.length, cap);
+        out.length = (uint32_t)h264_finalize_idr(dst, out.length, cap);
+        if (!out.length) {
+            return ESP_FAIL;
+        }
     }
     video_frame_publish(wslot, out.length, is_idr);
     capture_status_add_frame(out.length);
