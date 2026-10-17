@@ -113,6 +113,53 @@ This reconciliation changes only the ledger and preserves unrelated roadmap,
 bundle and dependency working-tree changes. Historical tests below were not
 rerun for this documentation update.
 
+## H.264 bitrate comparison (2026-10-17)
+
+The retained 40 ms queue and diagnostics firmware ran four 60-second SD/PCM
+trials in 4000/1000/1000/4000 kbit/s order. Each included a 50-second H.264
+WebSocket viewer started after recording began. All four viewers completed
+with ACKs; all saved H.264/AAC tracks passed strict decoding, recorder video
+and audio drop counts were zero, and settings were restored after every trial.
+The movie continued through different scenes; this is a repeated workload
+comparison, not a same-frame deterministic benchmark or perceptual quality test.
+
+| Trial / target kbit/s | Live video fps / delivered kbit/s | Live PCM seconds / wall seconds | Confirmed PCM gap seconds | Longest successful PCM send | SD video frames / AAC seconds |
+| --- | --- | --- | --- | --- | --- |
+| 1 / 4000 | 4.3 / 595 | 58.385 / 60.003 | 1.580 | 220.779 ms | 760 / 60.032 |
+| 2 / 1000 | 8.0 / 719 | 59.495 / 60.022 | 0.495 | 183.260 ms | 793 / 60.032 |
+| 3 / 1000 | 8.9 / 564 | 59.620 / 60.005 | 0.360 | 212.575 ms | 784 / 60.075 |
+| 4 / 4000 | 6.1 / 779 | 59.630 / 60.005 | 0.355 | 87.867 ms | 718 / 60.011 |
+
+**Decision:** 1000 kbit/s improved delivered video frame rate in both trials,
+but did not consistently reduce PCM gaps: the final 4000 trial slightly beat
+both lower-bitrate trials for audio continuity. Do not present lowering bitrate
+as an audio fix or change the permanent default on this evidence. The delivered
+video throughput also did not simply track the configured bitrate cap. Scene
+content, frame sizes and send scheduling remain confounders. Physical A/V delay,
+browser playback quality and visual quality at the lower bitrate were not tested.
+
+The [comparison helper change](https://github.com/ZacharyLeahan/espkvm-xbox/commit/41969286befc93a1a10250e3e88ddee51652ee58)
+adds `--h264-kbps` (500..20000, default 4000), checks applied settings before
+starting, saves only allowlisted requested/applied settings, and restores the
+original bitrate. Eight host tests passed, including rejection before device
+access and restoring a different original bitrate after a failed write.
+No firmware or API contract changed in this follow-up.
+
+Local evidence: `/tmp/espkvm-bitrate-comparison-01/summary.json`, each numbered
+trial's `result.json`, and its adjacent `*-video.log` / `*-counters.log`.
+The clips are `VIDEO/up-001639.ts`, `VIDEO/up-001722.ts`, `VIDEO/up-001802.ts`,
+and `VIDEO/up-001878.ts`; raw media stays local and on the card. Recorder is
+stopped and original settings restored. Saved TS SHA-256 values, in trial order:
+
+- `e4708879b5035d675b97f69df5d99e3e0558e93288db78df7e23fc852ef98305`
+- `2b6e7239a9af1cd5a3ccf7ed6e6ec09928d09f1d24e136e2fe033ab85a509182`
+- `bff8c7d130e9a7b11f67dab9389faf3af8e1e9b06b1450276f45cadd55565ae2`
+- `ebbfd741a2d625086d30ca392af4b78187de52b728942c45464e1334b46a9ec1`
+
+Next useful isolation: compare live PCM alone against PCM plus video and PCM
+plus SD recording, then correlate frame-size/send-time distributions with audio
+gaps. Keep the streaming acceptance gap open; the bitrate test did not close it.
+
 ## Live PCM queue diagnosis (2026-10-17)
 
 [Diagnostics implementation](https://github.com/ZacharyLeahan/espkvm-xbox/commit/b2d1424c75ea0ececfa5abcb38e339af0ff433c4)
@@ -204,9 +251,9 @@ playback. The device is left on this image with recording stopped and settings
 restored. Evidence: `/tmp/espkvm-delivery-final-01/result.json`,
 `/tmp/espkvm-delivery-final-video.log`, `/tmp/espkvm-delivery-final-device.log`.
 
-Next: compare the same bounded workload at a lower H.264 bitrate to test
-whether video bursts contribute to shared network stalls, then investigate
-send scheduling/packetization. Keep uninterrupted video, live PCM continuity,
+The bitrate comparison above follows this checkpoint and does not establish
+a consistent audio improvement. Further work should isolate concurrent loads
+and investigate send scheduling/packetization. Keep uninterrupted video, live PCM continuity,
 browser playback and physical latency open in the acceptance ledger.
 
 The PCM counters measure server transport, not speaker output. The browser
