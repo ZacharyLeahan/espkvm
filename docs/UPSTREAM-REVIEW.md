@@ -137,6 +137,47 @@ HTTPS browser behavior, meaningful source audio, repeated HDMI transitions,
 VPN direct/relay recovery, live upload fallback and final dependency publication
 remain acceptance work. No overall five-area completion is claimed.
 
+## Streaming investigation follow-up (2026-10-16)
+
+Implementation: [a781cb5](https://github.com/ZacharyLeahan/espkvm-xbox/commit/a781cb57a510e3998c44efa73d161b974cd94e23).
+A received IDR already repairs skipped references, so the video pump no longer
+requests another IDR merely because this keyframe follows a sequence gap.
+The source attribution is retained for the upstream recovery adaptation.
+
+- Build and application-only flash succeeded. ACK-window and session-TX host
+  checks passed. New sanitizer checks exercise the production fragmented-send
+  function's message lock, final flags, pacing boundaries and failure unlock.
+  A local WebSocket fixture tests advertisement-gated ACKs, short control
+  messages and early close. Both new tests are wired into CI.
+- A 15-second H.264 run after the IDR correction delivered 21 IDRs (1.4 fps)
+  while the encoder reported about 19 fps. This does not establish a throughput
+  improvement over the earlier differently loaded run. Codec settings were
+  restored after the bounded test.
+- A temporary 16 KB burst trial delivered 14 IDRs in 20 seconds and the client
+  departed early. No matching allocation/watchdog warnings were found in its
+  bounded serial sample, but that does not make the trial successful. It was
+  **rejected and reverted**, including on the installed device. The existing
+  1 KB fragments / 4 KB burst pacing remains. Network burst tuning is not a
+  completed adaptation or a proven fix for low frame rate.
+- The old probe could return success after an early socket close if it had
+  received any frames. The new probe fails early closes. After restoring the
+  4 KB image, an eight-second MJPEG check stayed connected and negotiated ACKs.
+  It received one static frame; this is connection evidence, not motion FPS.
+- Browser inspection confirmed first-open Video selection and one each of the
+  Target, Pointer and Keyboard groups on Input. H.264 correctly explained its
+  HTTPS requirement on the existing HTTP page. HTTPS decoding and delayed-save
+  browser interaction remain open; host draft-race tests are separate evidence.
+- The device advertised a Tailscale address and six peers, but a request from
+  this host to that address timed out. LAN access recovered after normal flash
+  startup. Neither the advertised peer count nor LAN access proves VPN direct/
+  relay operation; that acceptance item remains unresolved.
+
+Local media/logs remain in `/tmp/espkvm-repair-idr.h264`,
+`/tmp/espkvm-burst16.h264`, `/tmp/espkvm-burst16-serial.log` and
+`/tmp/espkvm-restored-serial.log`. Meaningful moving/audible source validation
+and the remaining combined-device gates still precede publication and final
+acceptance of the five areas.
+
 ## Video adaptation progress (2026-10-16)
 
 This implementation update follows the reconciliation above; it does not mark
