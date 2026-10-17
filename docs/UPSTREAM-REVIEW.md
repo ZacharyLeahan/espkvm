@@ -111,6 +111,32 @@ all five areas complete or establish device performance.
   encoder output changed, so the existing SD recording result must be repeated
   on the new image before claiming recording compatibility.
 
+## Memory adaptation progress (2026-10-16)
+
+Implementation: [9a44661](https://github.com/ZacharyLeahan/espkvm-xbox/commit/9a44661e3406935de431ebf836695fe511b87d67).
+This supersedes the outstanding status for upload fallback and lazy WireGuard
+only; heap/stack diagnostics and frame freshness remain outstanding.
+
+- `cae095f` upload subset: prefer four 256 KB aligned PSRAM buffers, retry with
+  smaller sizes down to 32 KB when needed, and accept fewer buffers. Failed
+  larger attempts are freed before retry; queue rejection frees the allocation.
+  All buffers in a transfer have the same capacity. Existing recording/upload
+  exclusion and file handling are unchanged. Eight injected allocation/queue
+  scenarios passed under address/undefined sanitizers using the production
+  allocator function, including complete exhaustion and cleanup.
+- `e14b7ca` WireGuard subset: keep the existing 8 KB worker stack but allocate it
+  only on first enable. Serialize worker creation against concurrent settings/IP
+  events, and clean up partial semaphore initialization so retries work. Tests
+  use the production init/apply/start functions and cover both semaphore failures,
+  task creation failure/retry, disabled/enabled boot and 16 concurrent apply calls.
+  The worker is retained after first use and sleeps when disabled; this does not
+  claim reclamation on disable.
+- Both tests are wired into firmware CI. The combined audio-enabled firmware
+  build passed without warnings in this incremental build. No new REST fields
+  were added in this subset. Live uploads after sustained capture, device memory
+  measurements and real tunnel enable/reconnect remain unverified. No flash or
+  push was performed; other transport/dependency adaptations remain in progress.
+
 ## Earlier decisions, reconciled on 2026-10-16
 
 | Upstream commit / scope | Decision | Decision rationale / scope | Our implementation / verification |
